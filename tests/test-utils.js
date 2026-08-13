@@ -36,3 +36,38 @@ export function daysAgo(n) {
   d.setDate(d.getDate() - n);
   return d.toISOString().slice(0, 10);
 }
+
+// Polls a condition until it's truthy — needed once app.js's write paths
+// became async (Supabase-or-localStorage): dispatching a DOM event no longer
+// guarantees the resulting state change has landed by the very next line.
+//
+// Deliberately polls via queueMicrotask, not setTimeout: Chrome's
+// `--dump-dom` (how CI reads these test pages' results) captures the DOM
+// once the microtask queue drains after `load`, but does not wait for
+// macrotasks/timers — a setTimeout-based retry loop never gets seen. Local
+// (signed-out) storage calls resolve from already-fulfilled promises, so a
+// bounded number of microtask turns is enough to drain them.
+export function waitFor(conditionFn, { maxTicks = 5000 } = {}) {
+  return new Promise((resolve, reject) => {
+    let ticks = 0;
+    function check() {
+      let result;
+      try {
+        result = conditionFn();
+      } catch {
+        result = false;
+      }
+      if (result) {
+        resolve(result);
+        return;
+      }
+      ticks++;
+      if (ticks > maxTicks) {
+        reject(new Error(`waitFor exceeded ${maxTicks} microtask ticks`));
+        return;
+      }
+      queueMicrotask(check);
+    }
+    check();
+  });
+}

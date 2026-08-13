@@ -64,8 +64,45 @@ a { color: var(--accent); }
   display: flex;
   align-items: baseline;
   gap: 14px;
+  flex-wrap: wrap;
   background: linear-gradient(180deg, var(--bg-elevated), var(--bg));
 }
+
+.auth-bar {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono);
+}
+
+.auth-status {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.auth-status.synced { color: var(--good); }
+.auth-status.sync-error { color: var(--warn); }
+
+.auth-bar button {
+  font-size: 11px;
+  padding: 6px 10px;
+}
+
+.migrate-banner {
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--accent-dim);
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.migrate-banner p { margin: 0; color: var(--text); }
+.migrate-actions { display: flex; gap: 8px; }
+.migrate-actions button { font-size: 12px; padding: 6px 10px; width: auto; }
 
 .app-header .plate-mark {
   width: 34px;

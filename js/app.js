@@ -2,7 +2,14 @@
 // the DOM to the algorithm modules in js/lib and persists via js/lib/storage.
 
 import { MUSCLE_GROUPS, MUSCLE_GROUP_LABELS, searchLibrary, findInLibrary, guessMuscleGroup } from './data/exerciseLibrary.js';
-import { loadLogs, saveLogs, loadExerciseMeta, saveExerciseMeta, loadProfile, saveProfile } from './lib/storage.js';
+import {
+  loadLogs, appendSession, loadExerciseMeta, upsertExerciseMeta, loadProfile, saveProfile,
+  setActiveUser, getActiveUser, migrateLocalDataToCloud, countLocalSessions, clearLocalData,
+} from './lib/storage.js';
+import {
+  isSupabaseConfigured, hasCachedSupabaseSession, isOAuthRedirectInProgress,
+  getCurrentUser, signInWithGoogle, signOut,
+} from './lib/supabaseClient.js';
 import { buildTodaysPlan } from './lib/plan.js';
 import { getMuscleGroupReadiness } from './lib/readiness.js';
 import { recommendSessionType } from './lib/periodization.js';
@@ -16,9 +23,9 @@ import { todayStr, formatDateDisplay } from './lib/dateUtils.js';
 // State
 // ---------------------------------------------------------------------------
 
-let logs = loadLogs();
-let exerciseMeta = loadExerciseMeta();
-let profile = loadProfile();
+let logs = [];
+let exerciseMeta = {};
+let profile = { bodyweight: null, height: null, unit: 'kg' };
 
 let currentExercise = null;
 let currentPlanResult = null;
@@ -67,17 +74,57 @@ const saveProfileBtn = document.getElementById('save-profile-btn');
 const bodyweightUnitLabel = document.getElementById('bodyweight-unit-label');
 const heightUnitLabel = document.getElementById('height-unit-label');
 
+const authStatusText = document.getElementById('auth-status-text');
+const authActionBtn = document.getElementById('auth-action-btn');
+const migrateBanner = document.getElementById('migrate-banner');
+const migrateCountEl = document.getElementById('migrate-count');
+const migrateYesBtn = document.getElementById('migrate-yes-btn');
+const migrateNoBtn = document.getElementById('migrate-no-btn');
+
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 
-function init() {
+async function init() {
   MUSCLE_GROUPS.forEach((mg) => {
     const opt = document.createElement('option');
     opt.value = mg;
     opt.textContent = MUSCLE_GROUP_LABELS[mg];
     muscleGroupSelect.appendChild(opt);
   });
+
+  wireEvents();
+  wireAuthEvents();
+
+  // Only pay the (lazy-loaded) Supabase network cost when there's actually a
+  // reason to: a cached session from a previous sign-in, or landing back
+  // here as the target of a Google OAuth redirect. A first-time or
+  // never-signed-in visitor never loads the SDK at all.
+  if (isSupabaseConfigured() && (hasCachedSupabaseSession() || isOAuthRedirectInProgress())) {
+    try {
+      const user = await getCurrentUser();
+      setActiveUser(user);
+      updateAuthUI(user);
+      maybeOfferMigration(user);
+    } catch (err) {
+      console.error('Failed to resume Supabase session:', err);
+      showAuthStatus('Sync unavailable — working locally.', 'sync-error');
+    }
+  }
+
+  await loadAndRenderAll();
+}
+
+async function loadAndRenderAll() {
+  try {
+    [logs, exerciseMeta, profile] = await Promise.all([loadLogs(), loadExerciseMeta(), loadProfile()]);
+  } catch (err) {
+    console.error('Failed to load data:', err);
+    showAuthStatus('Sync failed — showing local data only.', 'sync-error');
+    setActiveUser(null);
+    updateAuthUI(null);
+    [logs, exerciseMeta, profile] = await Promise.all([loadLogs(), loadExerciseMeta(), loadProfile()]);
+  }
 
   profileBodyweight.value = profile.bodyweight ?? '';
   profileHeight.value = profile.height ?? '';
@@ -87,8 +134,7 @@ function init() {
   buildBlankGrid(3);
   renderHistorySelectOptions();
   renderHistoryTable(historyExerciseSelect.value || null);
-
-  wireEvents();
+  if (currentExercise) recomputePlan();
 }
 
 function wireEvents() {
@@ -102,10 +148,14 @@ function wireEvents() {
     suggestionsEl.classList.remove('open');
   });
 
-  muscleGroupSelect.addEventListener('change', () => {
+  muscleGroupSelect.addEventListener('change', async () => {
     if (currentExercise) {
       exerciseMeta[currentExercise] = muscleGroupSelect.value;
-      saveExerciseMeta(exerciseMeta);
+      try {
+        await upsertExerciseMeta(currentExercise, muscleGroupSelect.value);
+      } catch (err) {
+        showAuthStatus('Sync failed for that change.', 'sync-error');
+      }
     }
     recomputePlan();
   });
@@ -138,15 +188,101 @@ function wireEvents() {
 
   profileUnit.addEventListener('change', updateProfileUnitLabels);
 
-  saveProfileBtn.addEventListener('click', () => {
+  saveProfileBtn.addEventListener('click', async () => {
     profile = {
       bodyweight: profileBodyweight.value ? Number(profileBodyweight.value) : null,
       height: profileHeight.value ? Number(profileHeight.value) : null,
       unit: profileUnit.value,
     };
-    const ok = saveProfile(profile);
-    saveStatusFlash(saveProfileBtn, ok ? 'Saved.' : 'Save failed (storage unavailable).');
+    try {
+      await saveProfile(profile);
+      saveStatusFlash(saveProfileBtn, 'Saved.');
+    } catch (err) {
+      saveStatusFlash(saveProfileBtn, 'Save failed (sync unavailable).', true);
+    }
     if (currentExercise) recomputePlan();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Auth (Supabase — Google sign-in, opt-in cloud sync)
+// ---------------------------------------------------------------------------
+
+function showAuthStatus(text, cls = '') {
+  authStatusText.textContent = text;
+  authStatusText.className = `auth-status ${cls}`.trim();
+}
+
+function updateAuthUI(user) {
+  if (user) {
+    showAuthStatus(`Synced as ${user.email || 'signed in'}`, 'synced');
+    authActionBtn.textContent = 'Sign out';
+  } else {
+    showAuthStatus('Working locally — not synced', '');
+    authActionBtn.textContent = 'Sign in with Google to sync';
+  }
+}
+
+function maybeOfferMigration(user) {
+  const count = user ? countLocalSessions() : 0;
+  if (!user || count === 0) {
+    migrateBanner.classList.add('hidden');
+    return;
+  }
+  migrateCountEl.textContent = String(count);
+  migrateBanner.classList.remove('hidden');
+}
+
+function wireAuthEvents() {
+  if (!isSupabaseConfigured()) {
+    authActionBtn.disabled = true;
+    showAuthStatus('Sync not configured', '');
+    return;
+  }
+
+  authActionBtn.addEventListener('click', async () => {
+    authActionBtn.disabled = true;
+    if (getActiveUser()) {
+      try {
+        await signOut();
+        setActiveUser(null);
+        updateAuthUI(null);
+        migrateBanner.classList.add('hidden');
+        await loadAndRenderAll();
+      } catch (err) {
+        showAuthStatus('Sign-out failed.', 'sync-error');
+      } finally {
+        authActionBtn.disabled = false;
+      }
+      return;
+    }
+    showAuthStatus('Redirecting to Google…', '');
+    try {
+      await signInWithGoogle();
+      // The browser navigates away here — nothing after this line runs.
+    } catch (err) {
+      showAuthStatus('Sign-in failed.', 'sync-error');
+      authActionBtn.disabled = false;
+    }
+  });
+
+  migrateYesBtn.addEventListener('click', async () => {
+    const user = getActiveUser();
+    if (!user) return;
+    migrateBanner.classList.add('hidden');
+    showAuthStatus('Importing your local data…', '');
+    try {
+      await migrateLocalDataToCloud(user.id);
+      clearLocalData();
+      await loadAndRenderAll();
+      showAuthStatus(`Synced as ${user.email || 'signed in'}`, 'synced');
+    } catch (err) {
+      showAuthStatus('Import failed — your local data is untouched.', 'sync-error');
+    }
+  });
+
+  migrateNoBtn.addEventListener('click', () => {
+    migrateBanner.classList.add('hidden');
   });
 }
 
@@ -351,7 +487,7 @@ function parseNumOrNull(v) {
   return Number.isNaN(n) ? null : n;
 }
 
-function saveSession() {
+async function saveSession() {
   if (!currentExercise) {
     saveStatusFlash(saveSessionBtn, 'Pick an exercise first.', true);
     return;
@@ -377,13 +513,19 @@ function saveSession() {
     sets,
   };
 
-  logs.push(entry);
-  const logsOk = saveLogs(logs);
-
-  exerciseMeta[currentExercise] = muscleGroupSelect.value;
-  const metaOk = saveExerciseMeta(exerciseMeta);
-
-  saveStatusFlash(saveSessionBtn, logsOk && metaOk ? 'Session saved.' : 'Saved for this session only — storage write failed.');
+  saveSessionBtn.disabled = true;
+  try {
+    await appendSession(entry);
+    logs.push(entry);
+    await upsertExerciseMeta(currentExercise, muscleGroupSelect.value);
+    exerciseMeta[currentExercise] = muscleGroupSelect.value;
+    saveStatusFlash(saveSessionBtn, 'Session saved.');
+  } catch (err) {
+    saveStatusFlash(saveSessionBtn, 'Save failed — check your connection and try again.', true);
+    return;
+  } finally {
+    saveSessionBtn.disabled = false;
+  }
 
   recomputePlan({ resetSelectors: true });
   renderHistorySelectOptions();

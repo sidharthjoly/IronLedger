@@ -13,7 +13,19 @@
       <h1>IRON <span>LEDGER</span></h1>
       <div class="tagline">strength log &amp; progression planner</div>
     </div>
+    <div class="auth-bar" id="auth-bar">
+      <span class="auth-status" id="auth-status-text">Working locally — not synced</span>
+      <button type="button" class="secondary" id="auth-action-btn">Sign in with Google to sync</button>
+    </div>
   </header>
+
+  <div class="migrate-banner hidden" id="migrate-banner">
+    <p><span id="migrate-count">0</span> session(s) logged on this device. Import them into your account?</p>
+    <div class="migrate-actions">
+      <button type="button" id="migrate-yes-btn">Import to my account</button>
+      <button type="button" class="secondary" id="migrate-no-btn">Skip</button>
+    </div>
+  </div>
 
   <main>
     <div class="col-main">

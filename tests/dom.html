@@ -4,7 +4,7 @@
 <pre id="out">running...</pre>
 <iframe id="frame" src="../index.html" style="width:1000px;height:1400px;"></iframe>
 <script type="module">
-import { makeRunner } from './test-utils.js';
+import { makeRunner, waitFor } from './test-utils.js';
 
 const { assert, report } = makeRunner();
 
@@ -19,20 +19,22 @@ function fireClick(el) {
   el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 }
 
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
   try {
-    run();
+    await run();
   } catch (e) {
     assert('test ran without throwing', false, { message: e.message, stack: e.stack });
   }
   report();
 });
 
-function run() {
+// This suite only exercises the signed-out (localStorage) path — CI has no
+// way to complete a real Google OAuth redirect. That path is exactly what a
+// first-time visitor gets by default (see js/lib/supabaseClient.js: the SDK
+// is lazy-loaded and never touched here), so it's a faithful, fully
+// network-independent test of the app's default experience.
+async function run() {
   const doc = document.getElementById('frame').contentDocument;
-
-  // Fresh headless Chrome profile per CI run means localStorage starts empty;
-  // clear defensively in case this page is opened manually after other testing.
   document.getElementById('frame').contentWindow.localStorage.clear();
 
   // --- select an exercise via the suggestion list (the synchronous path) ---
@@ -45,6 +47,7 @@ function run() {
   fireMousedown(target);
 
   const muscleGroupSelect = doc.getElementById('muscle-group-select');
+  await waitFor(() => muscleGroupSelect.value === 'chest');
   assert('selecting the exercise auto-fills its muscle group', muscleGroupSelect.value === 'chest', muscleGroupSelect.value);
 
   assert('plan-empty hides once an exercise is selected', doc.getElementById('plan-empty').classList.contains('hidden'));
@@ -67,7 +70,10 @@ function run() {
   });
   fireClick(doc.getElementById('save-session-btn'));
 
+  await waitFor(() => doc.getElementById('save-status').textContent.length > 0);
   assert('save confirms success', doc.getElementById('save-status').textContent === 'Session saved.', doc.getElementById('save-status').textContent);
+
+  await waitFor(() => doc.querySelectorAll('#history-table-body tr').length === 1);
   assert('history select switches to the just-logged exercise', doc.getElementById('history-exercise-select').value === 'Barbell Bench Press');
   const historyRows = doc.querySelectorAll('#history-table-body tr');
   assert('history shows exactly 1 row after 1 save', historyRows.length === 1, historyRows.length);
@@ -99,6 +105,7 @@ function run() {
   });
   fireClick(doc.getElementById('save-session-btn'));
 
+  await waitFor(() => doc.querySelectorAll('#history-table-body tr').length === 2);
   assert('2 sessions logged -> chart-section becomes visible', !doc.getElementById('chart-section').classList.contains('hidden'));
   assert('2 sessions logged -> chart-empty note hides', doc.getElementById('chart-empty').classList.contains('hidden'));
   assert('weight trend chart rendered an SVG', !!doc.querySelector('#weight-trend-chart svg'));
@@ -112,6 +119,10 @@ function run() {
   unitSelect.dispatchEvent(new Event('change', { bubbles: true }));
   assert('switching to lb updates the bodyweight label', doc.getElementById('bodyweight-unit-label').textContent === 'lb');
   assert('switching to lb updates height to "in", not "lb"', doc.getElementById('height-unit-label').textContent === 'in');
+
+  // --- auth bar defaults to local mode, no network, when there's no cached session ---
+  assert('auth bar shows local-mode status by default', doc.getElementById('auth-status-text').textContent === 'Working locally — not synced', doc.getElementById('auth-status-text').textContent);
+  assert('auth action button offers Google sign-in', doc.getElementById('auth-action-btn').textContent === 'Sign in with Google to sync');
 }
 </script>
 </body></html>
