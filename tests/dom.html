@@ -111,6 +111,51 @@ async function run() {
   assert('weight trend chart rendered an SVG', !!doc.querySelector('#weight-trend-chart svg'));
   assert('volume chart rendered an SVG', !!doc.querySelector('#volume-chart svg'));
 
+  // --- edit a session ---
+  const historyRowsBeforeEdit = doc.querySelectorAll('#history-table-body tr');
+  const editTargetRow = [...historyRowsBeforeEdit].find((tr) => tr.textContent.includes('62.5kg'));
+  fireClick(editTargetRow.querySelector('.edit-row'));
+
+  await waitFor(() => doc.getElementById('log-form-title').textContent === 'Edit Session');
+  assert('clicking Edit switches the form into edit mode', doc.getElementById('log-form-title').textContent === 'Edit Session');
+  assert('edit mode shows the editing banner', !doc.getElementById('editing-banner').classList.contains('hidden'));
+  assert('edit mode relabels the save button', doc.getElementById('save-session-btn').textContent === 'Update Session');
+
+  const editSetRows = doc.querySelectorAll('#sets-grid .set-row');
+  assert("edit mode pre-fills the sets grid with the session's actual values", editSetRows[0].querySelector('.set-weight').value === '62.5', editSetRows[0].querySelector('.set-weight').value);
+
+  fireInput(editSetRows[0].querySelector('.set-weight'), 65);
+  fireClick(doc.getElementById('save-session-btn'));
+
+  await waitFor(() => doc.getElementById('save-status').textContent === 'Session updated.');
+  assert('updating a session confirms success', doc.getElementById('save-status').textContent === 'Session updated.');
+  assert('edit mode exits after a successful update', doc.getElementById('log-form-title').textContent === 'Log This Session');
+  assert('cancel-edit button hides again after update', doc.getElementById('cancel-edit-btn').classList.contains('hidden'));
+
+  const rowsAfterEdit = doc.querySelectorAll('#history-table-body tr');
+  assert('still exactly 2 history rows after an edit (not a duplicate)', rowsAfterEdit.length === 2, rowsAfterEdit.length);
+  assert('the edited weight shows up in the history table', [...rowsAfterEdit].some((tr) => tr.textContent.includes('65kg')));
+
+  // --- cancel an edit leaves the original data untouched ---
+  fireClick(rowsAfterEdit[0].querySelector('.edit-row'));
+  await waitFor(() => doc.getElementById('log-form-title').textContent === 'Edit Session');
+  fireClick(doc.getElementById('cancel-edit-btn'));
+  assert('Cancel Edit exits edit mode without saving', doc.getElementById('log-form-title').textContent === 'Log This Session');
+  assert('Cancel Edit still leaves exactly 2 history rows', doc.querySelectorAll('#history-table-body tr').length === 2);
+
+  // --- delete a session ---
+  win.confirm = () => true; // headless Chrome auto-dismisses native confirm() dialogs otherwise
+  const rowToDelete = [...doc.querySelectorAll('#history-table-body tr')].find((tr) => tr.textContent.includes('65kg'));
+  fireClick(rowToDelete.querySelector('.delete-row'));
+
+  await waitFor(() => doc.querySelectorAll('#history-table-body tr').length === 1);
+  assert('deleting a session removes its row', doc.querySelectorAll('#history-table-body tr').length === 1);
+  const remainingRows = doc.querySelectorAll('#history-table-body tr');
+  assert('the remaining row is the untouched original session', [...remainingRows].some((tr) => tr.textContent.includes('60kg')));
+
+  const rawLogsAfterDelete = JSON.parse(win.localStorage.getItem('gymapp:logs') || '[]');
+  assert('delete removes the entry from localStorage too', rawLogsAfterDelete.length === 1, rawLogsAfterDelete.length);
+
   // --- profile unit labels (height is cm/in, never reuses kg/lb) ---
   const unitSelect = doc.getElementById('profile-unit');
   assert('bodyweight label starts as kg', doc.getElementById('bodyweight-unit-label').textContent === 'kg');

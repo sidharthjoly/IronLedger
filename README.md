@@ -8,6 +8,11 @@ A personal strength-training log that tells you exactly what to lift next
 session — full set-by-set prescriptions, not just one number — instead of
 just recording what you did.
 
+<p>
+  <img src="docs/screenshots/strength-test-day.png" alt="Iron Ledger showing a periodized strength-test day: readiness status, a warm-up ramp to a working single with back-off sets, the plate-loading visual, and progress charts" width="49%">
+  <img src="docs/screenshots/hypertrophy-day.png" alt="Iron Ledger showing a standard hypertrophy day: a double-progression load recommendation with reasoning, the plate stack, and a straight-sets table" width="49%">
+</p>
+
 ## The idea
 
 Most training logs are spreadsheets: you write down what happened, and
@@ -32,6 +37,13 @@ back an actual plan:
 - **Progress charts** — a working-weight trend line (hypertrophy sessions
   only — a strength test's near-1RM single is a different kind of number and
   would otherwise read as a spike) and a per-session volume-load bar chart.
+- **Editable history** — a logged session can be corrected or deleted, since
+  a fat-fingered weight doesn't just sit there wrong: progression math reads
+  directly off your last session, so bad data actively corrupts future
+  recommendations.
+- **Offline-resilient sync** — a save that fails for network reasons while
+  signed in (spotty gym signal) is queued and retried automatically once
+  back online, rather than lost.
 
 Every recommendation shows its reasoning in plain text, and the app is
 explicit that this is a general heuristic, not personalized medical or

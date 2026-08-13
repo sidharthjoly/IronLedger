@@ -3,8 +3,9 @@
 
 import { MUSCLE_GROUPS, MUSCLE_GROUP_LABELS, searchLibrary, findInLibrary, guessMuscleGroup } from './data/exerciseLibrary.js';
 import {
-  loadLogs, appendSession, loadExerciseMeta, upsertExerciseMeta, loadProfile, saveProfile,
+  loadLogs, appendSession, updateSession, deleteSession, loadExerciseMeta, upsertExerciseMeta, loadProfile, saveProfile,
   setActiveUser, getActiveUser, migrateLocalDataToCloud, countLocalSessions, clearLocalData,
+  countPendingSessions, syncPendingSessions,
 } from './lib/storage.js';
 import {
   isSupabaseConfigured, hasCachedSupabaseSession, isOAuthRedirectInProgress,
@@ -29,6 +30,7 @@ let profile = { bodyweight: null, height: null, unit: 'kg' };
 
 let currentExercise = null;
 let currentPlanResult = null;
+let editingSession = null;
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -57,7 +59,10 @@ const usePlanBtn = document.getElementById('use-plan-btn');
 const addSetBtn = document.getElementById('add-set-btn');
 const setsGrid = document.getElementById('sets-grid');
 const saveSessionBtn = document.getElementById('save-session-btn');
+const cancelEditBtn = document.getElementById('cancel-edit-btn');
 const saveStatusEl = document.getElementById('save-status');
+const logFormTitle = document.getElementById('log-form-title');
+const editingBanner = document.getElementById('editing-banner');
 
 const historyExerciseSelect = document.getElementById('history-exercise-select');
 const historyTableBody = document.getElementById('history-table-body');
@@ -106,6 +111,7 @@ async function init() {
       setActiveUser(user);
       updateAuthUI(user);
       maybeOfferMigration(user);
+      await trySyncPending();
     } catch (err) {
       console.error('Failed to resume Supabase session:', err);
       showAuthStatus('Sync unavailable — working locally.', 'sync-error');
@@ -181,9 +187,19 @@ function wireEvents() {
   });
 
   saveSessionBtn.addEventListener('click', saveSession);
+  cancelEditBtn.addEventListener('click', cancelEditSession);
 
   historyExerciseSelect.addEventListener('change', () => {
     renderHistoryTable(historyExerciseSelect.value || null);
+  });
+
+  historyTableBody.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-id]');
+    if (!btn) return;
+    const session = logs.find((l) => l.id === btn.dataset.id);
+    if (!session) return;
+    if (btn.classList.contains('edit-row')) startEditSession(session);
+    else if (btn.classList.contains('delete-row')) deleteSessionRow(session.id);
   });
 
   profileUnit.addEventListener('change', updateProfileUnitLabels);
@@ -215,12 +231,26 @@ function showAuthStatus(text, cls = '') {
 
 function updateAuthUI(user) {
   if (user) {
-    showAuthStatus(`Synced as ${user.email || 'signed in'}`, 'synced');
+    const pending = countPendingSessions();
+    const suffix = pending > 0 ? ` · ${pending} session${pending === 1 ? '' : 's'} pending sync` : '';
+    showAuthStatus(`Synced as ${user.email || 'signed in'}${suffix}`, pending > 0 ? 'pending' : 'synced');
     authActionBtn.textContent = 'Sign out';
   } else {
     showAuthStatus('Working locally — not synced', '');
     authActionBtn.textContent = 'Sign in with Google to sync';
   }
+}
+
+// Retries any sessions that failed to sync for network reasons (logged at a
+// gym with no signal, etc.) — called on load (if already signed in) and
+// whenever the browser regains connectivity.
+async function trySyncPending() {
+  if (!getActiveUser()) return;
+  const result = await syncPendingSessions();
+  if (result.synced > 0 || result.dropped > 0) {
+    await loadAndRenderAll();
+  }
+  updateAuthUI(getActiveUser());
 }
 
 function maybeOfferMigration(user) {
@@ -234,6 +264,8 @@ function maybeOfferMigration(user) {
 }
 
 function wireAuthEvents() {
+  window.addEventListener('online', trySyncPending);
+
   if (!isSupabaseConfigured()) {
     authActionBtn.disabled = true;
     showAuthStatus('Sync not configured', '');
@@ -325,9 +357,11 @@ function renderSuggestions(results) {
   suggestionsEl.classList.add('open');
 }
 
+let exerciseBlurTimeout = null;
+
 function onExerciseBlur() {
   // Slight delay so a suggestion click (mousedown) registers before the list closes.
-  setTimeout(() => {
+  exerciseBlurTimeout = setTimeout(() => {
     suggestionsEl.classList.remove('open');
     const name = exerciseInput.value.trim();
     if (name) selectExercise(name);
@@ -335,6 +369,10 @@ function onExerciseBlur() {
 }
 
 function selectExercise(name) {
+  // Picking a different exercise mid-edit would otherwise silently carry
+  // the edit forward and overwrite the wrong session on save.
+  if (editingSession && editingSession.exerciseName !== name) cancelEditSession();
+
   currentExercise = name;
   const mg = exerciseMeta[name] || findInLibrary(name)?.muscleGroup || guessMuscleGroup(name) || MUSCLE_GROUPS[0];
   muscleGroupSelect.value = mg;
@@ -506,6 +544,41 @@ async function saveSession() {
     return;
   }
 
+  saveSessionBtn.disabled = true;
+
+  if (editingSession) {
+    // Editing keeps the original id/date — this corrects a past entry, it
+    // doesn't create a new one. The unit is re-declared as whatever's
+    // currently selected, since that's the unit the numbers on screen were
+    // just typed/edited under.
+    const updatedEntry = {
+      ...editingSession,
+      goal: goalSelect.value,
+      type: sessionTypeSelect.value,
+      muscleGroup: muscleGroupSelect.value,
+      unit: profile.unit || 'kg',
+      sets,
+    };
+    try {
+      await updateSession(updatedEntry);
+      const idx = logs.findIndex((l) => l.id === updatedEntry.id);
+      if (idx !== -1) logs[idx] = updatedEntry;
+      await upsertExerciseMeta(currentExercise, muscleGroupSelect.value);
+      exerciseMeta[currentExercise] = muscleGroupSelect.value;
+      saveStatusFlash(saveSessionBtn, 'Session updated.');
+    } catch (err) {
+      saveStatusFlash(saveSessionBtn, 'Update failed — check your connection and try again.', true);
+      saveSessionBtn.disabled = false;
+      return;
+    }
+    saveSessionBtn.disabled = false;
+    cancelEditSession();
+    recomputePlan({ resetSelectors: true });
+    renderHistorySelectOptions();
+    renderHistoryTable(currentExercise);
+    return;
+  }
+
   const entry = {
     id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
     date: todayStr(),
@@ -517,13 +590,19 @@ async function saveSession() {
     sets,
   };
 
-  saveSessionBtn.disabled = true;
   try {
-    await appendSession(entry);
+    const result = await appendSession(entry);
     logs.push(entry);
     await upsertExerciseMeta(currentExercise, muscleGroupSelect.value);
     exerciseMeta[currentExercise] = muscleGroupSelect.value;
-    saveStatusFlash(saveSessionBtn, 'Session saved.');
+    if (result.synced) {
+      saveStatusFlash(saveSessionBtn, 'Session saved.');
+    } else if (result.queued) {
+      saveStatusFlash(saveSessionBtn, "Saved on this device — will sync once you're back online.", 'pending');
+      updateAuthUI(getActiveUser());
+    } else {
+      saveStatusFlash(saveSessionBtn, 'Save failed — storage unavailable.', true);
+    }
   } catch (err) {
     saveStatusFlash(saveSessionBtn, 'Save failed — check your connection and try again.', true);
     return;
@@ -538,9 +617,61 @@ async function saveSession() {
   buildBlankGrid(Math.max(1, Math.min(10, parseInt(setCountInput.value, 10) || 3)));
 }
 
-function saveStatusFlash(nearEl, text, isWarning = false) {
+function startEditSession(session) {
+  // A pending exercise-search blur (see onExerciseBlur) firing ~120ms from
+  // now would otherwise call selectExercise() and reset the goal/session-type
+  // selectors this function is about to set from the historical session.
+  clearTimeout(exerciseBlurTimeout);
+  editingSession = session;
+  exerciseInput.value = session.exerciseName;
+  currentExercise = session.exerciseName;
+  muscleGroupSelect.value = session.muscleGroup;
+  goalSelect.value = session.goal;
+  sessionTypeSelect.value = session.type;
+  recomputePlan();
+
+  const currentUnit = profile.unit || 'kg';
+  const loggedUnit = session.unit || currentUnit;
+  const rows = session.sets.map((s) => ({
+    weight: convertWeight(s.weight, loggedUnit, currentUnit),
+    reps: s.reps,
+    rpe: s.rpe,
+  }));
+  renderSetsRows(rows);
+
+  logFormTitle.textContent = 'Edit Session';
+  editingBanner.classList.remove('hidden');
+  saveSessionBtn.textContent = 'Update Session';
+  cancelEditBtn.classList.remove('hidden');
+  document.getElementById('log-form-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelEditSession() {
+  editingSession = null;
+  logFormTitle.textContent = 'Log This Session';
+  editingBanner.classList.add('hidden');
+  saveSessionBtn.textContent = 'Save Session';
+  cancelEditBtn.classList.add('hidden');
+  buildBlankGrid(Math.max(1, Math.min(10, parseInt(setCountInput.value, 10) || 3)));
+}
+
+async function deleteSessionRow(id) {
+  if (!confirm('Delete this session? This can’t be undone.')) return;
+  try {
+    await deleteSession(id);
+    logs = logs.filter((l) => l.id !== id);
+    if (editingSession?.id === id) cancelEditSession();
+    renderHistorySelectOptions();
+    renderHistoryTable(historyExerciseSelect.value || null);
+    if (currentExercise) recomputePlan({ resetSelectors: true });
+  } catch (err) {
+    alert('Delete failed — check your connection and try again.');
+  }
+}
+
+function saveStatusFlash(nearEl, text, variant = false) {
   saveStatusEl.textContent = text;
-  saveStatusEl.style.color = isWarning ? 'var(--warn)' : 'var(--good)';
+  saveStatusEl.style.color = variant === true ? 'var(--warn)' : variant === 'pending' ? 'var(--accent)' : 'var(--good)';
   clearTimeout(saveStatusFlash._t);
   saveStatusFlash._t = setTimeout(() => {
     saveStatusEl.textContent = '';
@@ -598,6 +729,10 @@ function renderHistoryTable(exerciseName) {
         <td>${typeLabel}${goalLabel}</td>
         <td>${setsText}</td>
         <td class="${avgRpe !== null && avgRpe >= 9.5 ? 'avg-rpe-high' : ''}">${avgRpe !== null ? avgRpe.toFixed(1) : '—'}</td>
+        <td class="row-actions">
+          <button type="button" class="edit-row" data-id="${l.id}">Edit</button>
+          <button type="button" class="delete-row" data-id="${l.id}">Del</button>
+        </td>
       </tr>`;
     })
     .join('');

@@ -15,6 +15,7 @@ import { roundToPlate, getLoadIncrement, isLowerBodyCompound, convertWeight } fr
 import { todayStr } from '../js/lib/dateUtils.js';
 import { renderPlateStack } from '../js/components/plateStack.js';
 import { renderWeightTrendChart, renderVolumeChart } from '../js/components/progressChart.js';
+import { appendSession, updateSession, deleteSession, loadLogs, countPendingSessions, setActiveUser } from '../js/lib/storage.js';
 
 const { assert, report } = makeRunner();
 
@@ -153,6 +154,40 @@ const kgLogs = [{ date: daysAgo(5), exerciseName: 'Bench Press', type: 'hypertro
 const lbPlan = buildTodaysPlan({ exerciseName: 'Bench Press', muscleGroup: 'chest', goal: 'hypertrophy', sessionTypeOverride: 'hypertrophy', logs: kgLogs, exerciseMeta: { 'Bench Press': 'chest' }, profile: { unit: 'lb' } });
 const expectedWorkingLb = convertWeight(100, 'kg', 'lb');
 assert('bug fix: a kg session converts before lb progression math (not read as raw 100lb)', Math.abs((lbPlan.progression.nextWeight - 5) - expectedWorkingLb) < 1, { nextWeight: lbPlan.progression.nextWeight, expectedWorkingLb });
+
+// --- storage.js: local-mode CRUD + offline queue (cloud mode needs a real
+// network/auth session, so it's exercised manually against the live project
+// rather than in CI — see METHODOLOGY.md-style reasoning in tests/run.sh's
+// comments and the README's Testing section) ---
+localStorage.removeItem('gymapp:logs');
+localStorage.removeItem('gymapp:pendingSync');
+setActiveUser(null);
+
+assert('storage: countPendingSessions starts at 0 with no queue', countPendingSessions() === 0);
+
+const seedEntry = {
+  id: 'unit-test-session-1', date: '2026-01-01', exerciseName: 'Unit Test Exercise',
+  goal: 'hypertrophy', type: 'hypertrophy', unit: 'kg', muscleGroup: 'chest',
+  sets: [{ weight: 50, reps: 10, rpe: 7 }],
+};
+const appendResult = await appendSession(seedEntry);
+assert('storage: appendSession (local) reports synced:true', appendResult.synced === true, appendResult);
+let storedLogs = await loadLogs();
+assert('storage: appended session appears in loadLogs', storedLogs.some((l) => l.id === 'unit-test-session-1'));
+
+const updatedEntry = { ...seedEntry, sets: [{ weight: 55, reps: 8, rpe: 8 }] };
+await updateSession(updatedEntry);
+storedLogs = await loadLogs();
+const foundUpdated = storedLogs.find((l) => l.id === 'unit-test-session-1');
+assert('storage: updateSession (local) persists the change in place', foundUpdated?.sets[0].weight === 55, foundUpdated);
+assert('storage: updateSession (local) does not duplicate the row', storedLogs.filter((l) => l.id === 'unit-test-session-1').length === 1);
+
+await deleteSession('unit-test-session-1');
+storedLogs = await loadLogs();
+assert('storage: deleteSession (local) removes the entry', !storedLogs.some((l) => l.id === 'unit-test-session-1'));
+
+localStorage.removeItem('gymapp:logs');
+localStorage.removeItem('gymapp:pendingSync');
 
 // --- plate stack ---
 const plateHtml = renderPlateStack(100, 'kg');

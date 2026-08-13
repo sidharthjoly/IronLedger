@@ -15,6 +15,7 @@ const KEYS = {
   logs: 'gymapp:logs',
   exerciseMeta: 'gymapp:exerciseMeta',
   profile: 'gymapp:profile',
+  pendingSync: 'gymapp:pendingSync',
 };
 
 let activeUser = null;
@@ -97,17 +98,41 @@ function sessionToRow(entry, userId) {
   };
 }
 
+// Marks an error as "the request reached the server and was rejected"
+// (a bad value, an RLS violation) as opposed to a network-transport failure
+// (offline, DNS, timeout). appendSession() uses this to decide whether a
+// failure is worth silently queuing for retry — retrying a genuine
+// rejection would just fail forever and hide a real problem.
+function serverRejection(error) {
+  const err = new Error(error.message || 'Request rejected by the server');
+  err.isServerRejection = true;
+  err.code = error.code;
+  return err;
+}
+
 async function loadLogsCloud(userId) {
   const supabase = await getSupabaseClient();
   const { data, error } = await supabase.from('sessions').select('*').eq('user_id', userId).order('date', { ascending: false });
-  if (error) throw error;
+  if (error) throw serverRejection(error);
   return data.map(rowToSession);
 }
 
 async function appendSessionCloud(entry, userId) {
   const supabase = await getSupabaseClient();
   const { error } = await supabase.from('sessions').insert(sessionToRow(entry, userId));
-  if (error) throw error;
+  if (error) throw serverRejection(error);
+}
+
+async function updateSessionCloud(entry, userId) {
+  const supabase = await getSupabaseClient();
+  const { error } = await supabase.from('sessions').update(sessionToRow(entry, userId)).eq('id', entry.id).eq('user_id', userId);
+  if (error) throw serverRejection(error);
+}
+
+async function deleteSessionCloud(id, userId) {
+  const supabase = await getSupabaseClient();
+  const { error } = await supabase.from('sessions').delete().eq('id', id).eq('user_id', userId);
+  if (error) throw serverRejection(error);
 }
 
 async function loadExerciseMetaCloud(userId) {
@@ -141,6 +166,55 @@ async function saveProfileCloud(profile, userId) {
 }
 
 // --------------------------------------------------------------------------
+// Offline queue — a signed-in save that fails for network reasons (not a
+// server rejection) is queued here rather than lost, so a workout logged at
+// a gym with no signal survives and syncs automatically once back online.
+// --------------------------------------------------------------------------
+
+function loadPendingQueue() {
+  return loadJSON(KEYS.pendingSync, []);
+}
+
+function queuePendingSession(entry) {
+  const queue = loadPendingQueue();
+  queue.push(entry);
+  saveJSON(KEYS.pendingSync, queue);
+}
+
+export function countPendingSessions() {
+  return loadPendingQueue().length;
+}
+
+// Attempts to flush the queue. A queued entry that gets rejected by the
+// server (not a network failure) is dropped rather than retried forever —
+// it can never succeed as-is, and silently retrying it would just hide a
+// real problem behind a "will sync eventually" status forever.
+export async function syncPendingSessions() {
+  if (!activeUser) return { synced: 0, dropped: 0, remaining: 0 };
+  const queue = loadPendingQueue();
+  if (queue.length === 0) return { synced: 0, dropped: 0, remaining: 0 };
+
+  const stillPending = [];
+  let synced = 0;
+  let dropped = 0;
+  for (const entry of queue) {
+    try {
+      await appendSessionCloud(entry, activeUser.id);
+      synced++;
+    } catch (err) {
+      if (err.isServerRejection) {
+        console.error('Dropping a queued session the server rejected:', entry, err);
+        dropped++;
+      } else {
+        stillPending.push(entry);
+      }
+    }
+  }
+  saveJSON(KEYS.pendingSync, stillPending);
+  return { synced, dropped, remaining: stillPending.length };
+}
+
+// --------------------------------------------------------------------------
 // Unified public API
 // --------------------------------------------------------------------------
 
@@ -155,14 +229,47 @@ export async function loadLogs() {
 }
 
 // Appends exactly one newly logged session. Local mode re-persists the whole
-// (small, personal-scale) array; cloud mode inserts a single row.
+// (small, personal-scale) array; cloud mode inserts a single row. A network
+// failure while signed in queues the entry for retry instead of throwing —
+// the caller sees `{ synced: false }` rather than an error, since the entry
+// isn't lost, just not confirmed on the server yet. A genuine server
+// rejection still throws, since silently "queuing" that would never resolve.
 export async function appendSession(entry) {
   if (!activeUser) {
     const logs = loadLogsLocal();
     logs.push(entry);
+    const ok = saveJSON(KEYS.logs, logs);
+    return { synced: ok };
+  }
+  try {
+    await appendSessionCloud(entry, activeUser.id);
+    return { synced: true };
+  } catch (err) {
+    if (err.isServerRejection) throw err;
+    console.error('Save failed for network reasons — queued for retry:', err);
+    queuePendingSession(entry);
+    return { synced: false, queued: true };
+  }
+}
+
+export async function updateSession(entry) {
+  if (!activeUser) {
+    const logs = loadLogsLocal();
+    const idx = logs.findIndex((l) => l.id === entry.id);
+    if (idx === -1) throw new Error('Session not found');
+    logs[idx] = entry;
     return saveJSON(KEYS.logs, logs);
   }
-  await appendSessionCloud(entry, activeUser.id);
+  await updateSessionCloud(entry, activeUser.id);
+  return true;
+}
+
+export async function deleteSession(id) {
+  if (!activeUser) {
+    const logs = loadLogsLocal().filter((l) => l.id !== id);
+    return saveJSON(KEYS.logs, logs);
+  }
+  await deleteSessionCloud(id, activeUser.id);
   return true;
 }
 
