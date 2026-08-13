@@ -2,6 +2,8 @@
 
 [![tests](https://github.com/SidharthJoly/IronLedger/actions/workflows/tests.yml/badge.svg)](https://github.com/SidharthJoly/IronLedger/actions/workflows/tests.yml)
 
+**Live app:** https://sidharthjoly.github.io/IronLedger/
+
 A personal strength-training log that tells you exactly what to lift next
 session — full set-by-set prescriptions, not just one number — instead of
 just recording what you did.
@@ -47,13 +49,19 @@ below.
 
 ## Running it
 
-Any static file server works, e.g.:
+Just open the [live app](https://sidharthjoly.github.io/IronLedger/) —
+that's the deployed `main` branch, no setup needed.
+
+For local development, any static file server works, e.g.:
 
 ```
 python3 -m http.server 8000
 ```
 
-then open `http://localhost:8000`.
+then open `http://localhost:8000`. Cloud sync won't work against a local
+server unless that exact origin is added to Supabase's redirect-URL
+allow-list (see [Cloud sync](#cloud-sync-optional) below) — the rest of the
+app works identically either way.
 
 ## Cloud sync (optional)
 
