@@ -39,9 +39,11 @@ each heuristic and its citations.
 
 ## Stack
 
-Vanilla HTML/CSS/JS (ES modules, no framework, no build step) + localStorage
-for persistence. Same no-build-step philosophy as
-[ClassSniper](https://github.com/SidharthJoly/ClassSniper).
+Vanilla HTML/CSS/JS (ES modules, no framework, no build step). Same
+no-build-step philosophy as
+[ClassSniper](https://github.com/SidharthJoly/ClassSniper). Persistence is
+localStorage by default, with optional Supabase-backed cloud sync — see
+below.
 
 ## Running it
 
@@ -52,6 +54,40 @@ python3 -m http.server 8000
 ```
 
 then open `http://localhost:8000`.
+
+## Cloud sync (optional)
+
+By default the app is fully offline — everything lives in the browser's
+`localStorage`, and nothing is sent anywhere. Signing in with Google (top
+right) opts into cross-device sync via [Supabase](https://supabase.com): a
+hosted Postgres database, scoped per-user by row-level security, so the same
+log follows you across your phone and laptop.
+
+This is a genuinely optional upgrade, not a login wall — the Supabase SDK is
+loaded lazily (a dynamic `import()`), only when there's an actual reason to
+(a cached session from a previous sign-in, an in-progress OAuth redirect, or
+clicking the sign-in button). A visitor who never signs in never triggers a
+network request for it; the app works exactly like the original
+localStorage-only version.
+
+To point this at your own Supabase project:
+
+1. Create a project at [supabase.com](https://supabase.com), then paste
+   [`supabase/schema.sql`](supabase/schema.sql) into its SQL Editor and run
+   it — creates the `sessions`, `exercise_meta`, and `profiles` tables plus
+   their row-level security policies.
+2. Enable the Google provider under Authentication → Providers, using an
+   OAuth Client ID/Secret from Google Cloud Console (the callback URL to
+   register there is shown on that same screen).
+3. Under Authentication → URL Configuration, set **Site URL** and add a
+   **Redirect URL** entry for wherever the app is actually hosted — Supabase
+   falls back to its default (`localhost:3000`) for any `redirect_to` target
+   that isn't on this allow-list, which otherwise strands the sign-in
+   redirect on a URL nothing is serving.
+4. Drop your project's URL and publishable key into
+   [`js/lib/supabaseClient.js`](js/lib/supabaseClient.js). The publishable
+   key is meant to ship client-side (same model as a Firebase config object)
+   — actual data protection comes from the RLS policies, not from hiding it.
 
 ## Testing
 
@@ -68,7 +104,10 @@ readiness, periodization, the strength/hypertrophy plan generator, the
 exercise-library guesser, unit conversion, the plate stack and progress
 charts). `tests/dom.html` drives the actual app end to end in an iframe —
 selecting an exercise, logging sessions, and checking what lands in
-`localStorage` and the rendered DOM.
+`localStorage` and the rendered DOM. It only exercises the signed-out
+(localStorage) path — real Google OAuth can't run in CI — but that's exactly
+the default experience every first-time visitor gets, and it stays fully
+network-independent.
 
 ## Data model
 
@@ -83,7 +122,9 @@ selecting an exercise, logging sessions, and checking what lands in
   height are informational only right now; nothing in the app currently
   calculates from them.
 
-All data stays in the browser's `localStorage`; nothing is sent anywhere.
+Signed out, all data stays in the browser's `localStorage` and nothing is
+sent anywhere. Signed in, the same shape is persisted to Supabase instead —
+see [Cloud sync](#cloud-sync-optional) above.
 
 ## License
 
