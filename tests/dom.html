@@ -1,0 +1,117 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Iron Ledger — DOM Interaction Tests</title></head>
+<body>
+<pre id="out">running...</pre>
+<iframe id="frame" src="../index.html" style="width:1000px;height:1400px;"></iframe>
+<script type="module">
+import { makeRunner } from './test-utils.js';
+
+const { assert, report } = makeRunner();
+
+function fireInput(el, value) {
+  el.value = value;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+function fireMousedown(el) {
+  el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+}
+function fireClick(el) {
+  el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+}
+
+window.addEventListener('load', () => {
+  try {
+    run();
+  } catch (e) {
+    assert('test ran without throwing', false, { message: e.message, stack: e.stack });
+  }
+  report();
+});
+
+function run() {
+  const doc = document.getElementById('frame').contentDocument;
+
+  // Fresh headless Chrome profile per CI run means localStorage starts empty;
+  // clear defensively in case this page is opened manually after other testing.
+  document.getElementById('frame').contentWindow.localStorage.clear();
+
+  // --- select an exercise via the suggestion list (the synchronous path) ---
+  const exerciseInput = doc.getElementById('exercise-input');
+  fireInput(exerciseInput, 'Barbell Bench Press');
+  const suggestions = doc.getElementById('exercise-suggestions');
+  const items = suggestions.querySelectorAll('.suggestion-item');
+  assert('autocomplete finds "Barbell Bench Press"', items.length > 0, items.length);
+  const target = [...items].find((i) => i.dataset.name === 'Barbell Bench Press') || items[0];
+  fireMousedown(target);
+
+  const muscleGroupSelect = doc.getElementById('muscle-group-select');
+  assert('selecting the exercise auto-fills its muscle group', muscleGroupSelect.value === 'chest', muscleGroupSelect.value);
+
+  assert('plan-empty hides once an exercise is selected', doc.getElementById('plan-empty').classList.contains('hidden'));
+  assert('today-plan becomes visible', !doc.getElementById('today-plan').classList.contains('hidden'));
+  assert('first-time exercise gets "Establish Baseline" progression badge', doc.getElementById('progression-badge').textContent === 'Establish Baseline');
+  const noHistoryRows = doc.querySelectorAll('#plan-table-body tr');
+  assert('no prior history -> still shows the 3 target-rep rows', noHistoryRows.length === 3, noHistoryRows.length);
+  assert('no prior history -> weight column shows "—" (nothing to prescribe yet)', noHistoryRows[0]?.textContent.includes('—'), noHistoryRows[0]?.textContent);
+
+  // --- log a real session ---
+  const setRows = doc.querySelectorAll('#sets-grid .set-row');
+  assert('default sets-grid has 3 rows', setRows.length === 3, setRows.length);
+  const weights = [60, 60, 60];
+  const reps = [10, 10, 12];
+  const rpes = [7, 7, 8];
+  setRows.forEach((row, i) => {
+    fireInput(row.querySelector('.set-weight'), weights[i]);
+    fireInput(row.querySelector('.set-reps'), reps[i]);
+    fireInput(row.querySelector('.set-rpe'), rpes[i]);
+  });
+  fireClick(doc.getElementById('save-session-btn'));
+
+  assert('save confirms success', doc.getElementById('save-status').textContent === 'Session saved.', doc.getElementById('save-status').textContent);
+  assert('history select switches to the just-logged exercise', doc.getElementById('history-exercise-select').value === 'Barbell Bench Press');
+  const historyRows = doc.querySelectorAll('#history-table-body tr');
+  assert('history shows exactly 1 row after 1 save', historyRows.length === 1, historyRows.length);
+
+  const win = document.getElementById('frame').contentWindow;
+  const rawLogs = win.localStorage.getItem('gymapp:logs');
+  assert('session persisted to localStorage', !!rawLogs);
+  const parsedLogs = JSON.parse(rawLogs || '[]');
+  assert('exactly 1 log persisted', parsedLogs.length === 1, parsedLogs.length);
+  assert('persisted log is tagged with its unit', parsedLogs[0]?.unit === 'kg', parsedLogs[0]);
+  const rawMeta = win.localStorage.getItem('gymapp:exerciseMeta');
+  assert('exercise metadata persisted (Barbell Bench Press -> chest)', JSON.parse(rawMeta || '{}')['Barbell Bench Press'] === 'chest');
+
+  // Only 1 session logged -> charts require 2+, so the empty-state note should show instead.
+  assert('chart-section stays hidden with only 1 session', doc.getElementById('chart-section').classList.contains('hidden'));
+  assert('chart-empty note shows with only 1 session', !doc.getElementById('chart-empty').classList.contains('hidden'));
+
+  // --- log a 2nd session so the chart has enough points to render ---
+  fireInput(exerciseInput, 'Barbell Bench Press');
+  const items2 = doc.getElementById('exercise-suggestions').querySelectorAll('.suggestion-item');
+  fireMousedown([...items2].find((i) => i.dataset.name === 'Barbell Bench Press') || items2[0]);
+  const setRows2 = doc.querySelectorAll('#sets-grid .set-row');
+  const weights2 = [62.5, 62.5, 62.5];
+  const reps2 = [10, 10, 12];
+  setRows2.forEach((row, i) => {
+    fireInput(row.querySelector('.set-weight'), weights2[i]);
+    fireInput(row.querySelector('.set-reps'), reps2[i]);
+    fireInput(row.querySelector('.set-rpe'), 7);
+  });
+  fireClick(doc.getElementById('save-session-btn'));
+
+  assert('2 sessions logged -> chart-section becomes visible', !doc.getElementById('chart-section').classList.contains('hidden'));
+  assert('2 sessions logged -> chart-empty note hides', doc.getElementById('chart-empty').classList.contains('hidden'));
+  assert('weight trend chart rendered an SVG', !!doc.querySelector('#weight-trend-chart svg'));
+  assert('volume chart rendered an SVG', !!doc.querySelector('#volume-chart svg'));
+
+  // --- profile unit labels (height is cm/in, never reuses kg/lb) ---
+  const unitSelect = doc.getElementById('profile-unit');
+  assert('bodyweight label starts as kg', doc.getElementById('bodyweight-unit-label').textContent === 'kg');
+  assert('height label starts as cm, not a weight unit', doc.getElementById('height-unit-label').textContent === 'cm');
+  unitSelect.value = 'lb';
+  unitSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  assert('switching to lb updates the bodyweight label', doc.getElementById('bodyweight-unit-label').textContent === 'lb');
+  assert('switching to lb updates height to "in", not "lb"', doc.getElementById('height-unit-label').textContent === 'in');
+}
+</script>
+</body></html>

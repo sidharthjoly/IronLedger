@@ -119,6 +119,19 @@
           <label for="history-exercise-select">Exercise</label>
           <select id="history-exercise-select"></select>
         </div>
+
+        <div id="chart-section" class="chart-section hidden">
+          <div class="chart-block">
+            <h3 class="chart-title">Working Weight Trend</h3>
+            <div class="chart-container" id="weight-trend-chart"></div>
+          </div>
+          <div class="chart-block">
+            <h3 class="chart-title">Volume Load</h3>
+            <div class="chart-container" id="volume-chart"></div>
+          </div>
+        </div>
+        <div id="chart-empty" class="empty-state hidden">Log at least 2 sessions for this exercise to see a trend chart.</div>
+
         <table class="ledger-table" id="history-table">
           <thead>
             <tr><th>Date</th><th>Type</th><th>Sets</th><th>Avg RPE</th></tr>

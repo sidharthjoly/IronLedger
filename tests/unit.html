@@ -1,0 +1,185 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Iron Ledger — Unit Tests</title></head>
+<body>
+<pre id="out">running...</pre>
+<div id="chart-sandbox" style="width:560px;"></div>
+<script type="module">
+import { makeRunner, daysAgo } from './test-utils.js';
+import { epley1RM, generateHypertrophyPlan, generateStrengthTestPlan } from '../js/lib/planGenerator.js';
+import { computeProgression, getWorkingSets } from '../js/lib/progression.js';
+import { classifyReadiness } from '../js/lib/readiness.js';
+import { recommendSessionType } from '../js/lib/periodization.js';
+import { buildTodaysPlan } from '../js/lib/plan.js';
+import { guessMuscleGroup, findInLibrary, searchLibrary, EXERCISE_LIBRARY } from '../js/data/exerciseLibrary.js';
+import { roundToPlate, getLoadIncrement, isLowerBodyCompound, convertWeight } from '../js/lib/units.js';
+import { todayStr } from '../js/lib/dateUtils.js';
+import { renderPlateStack } from '../js/components/plateStack.js';
+import { renderWeightTrendChart, renderVolumeChart } from '../js/components/progressChart.js';
+
+const { assert, report } = makeRunner();
+
+// --- exercise library ---
+assert('library has 90+ exercises', EXERCISE_LIBRARY.length >= 90, EXERCISE_LIBRARY.length);
+assert('library covers 10 muscle groups', new Set(EXERCISE_LIBRARY.map((e) => e.muscleGroup)).size === 10);
+assert('findInLibrary is case-insensitive', findInLibrary('barbell bench press')?.muscleGroup === 'chest');
+assert('searchLibrary finds squat variants', searchLibrary('squat').length > 0);
+
+// --- muscle group guesser (order-sensitive keyword patterns) ---
+assert('guess: bench -> chest', guessMuscleGroup('Some Bench Variation') === 'chest');
+assert('guess: squat -> quads', guessMuscleGroup('Zercher Squat Thing') === 'quads');
+assert('guess: romanian deadlift -> hamstrings, not back', guessMuscleGroup('Romanian Deadlift Custom') === 'hamstrings');
+assert('guess: sumo deadlift -> glutes', guessMuscleGroup('Sumo Deadlift Variant') === 'glutes');
+assert('guess: plain deadlift -> back', guessMuscleGroup('Deficit Deadlift') === 'back');
+assert('guess: seated leg curl -> hamstrings, not biceps', guessMuscleGroup('Seated Leg Curl Machine') === 'hamstrings');
+assert('guess: close-grip bench press -> triceps, not chest', guessMuscleGroup('Close-Grip Bench Press') === 'triceps');
+assert('guess: hanging leg raise -> core', guessMuscleGroup('Hanging Leg Raise') === 'core');
+
+// --- units ---
+assert('lower body compound: squat -> true', isLowerBodyCompound('Back Squat') === true);
+assert('lower body compound: bench -> false', isLowerBodyCompound('Bench Press') === false);
+assert('increment: upper body kg = 2.5', getLoadIncrement('Bench Press', 'kg') === 2.5);
+assert('increment: lower body kg = 5', getLoadIncrement('Back Squat', 'kg') === 5);
+assert('roundToPlate: 101kg -> 100kg', roundToPlate(101, 'kg') === 100);
+assert('convertWeight: kg -> lb round-trips within 0.01', Math.abs(convertWeight(convertWeight(100, 'kg', 'lb'), 'lb', 'kg') - 100) < 0.01);
+assert('convertWeight: same unit is a no-op', convertWeight(100, 'kg', 'kg') === 100);
+
+// --- progression: double progression + RPE autoregulation ---
+assert('getWorkingSets: picks the heaviest-weight sets only', (() => {
+  const ws = getWorkingSets([{ weight: 20, reps: 12 }, { weight: 40, reps: 8 }, { weight: 40, reps: 9 }]);
+  return ws.length === 2 && ws.every((s) => s.weight === 40);
+})());
+
+const incSession = { date: '2026-08-01', goal: 'hypertrophy', type: 'hypertrophy', sets: [{ weight: 40, reps: 12, rpe: 7 }, { weight: 40, reps: 12, rpe: 8 }] };
+const incResult = computeProgression({ lastSession: incSession, exerciseName: 'Bench Press', unit: 'kg' });
+assert('progression: all working sets hit top of range @ RPE<=8 -> increase', incResult.decision === 'increase', incResult);
+assert('progression: increase amount is +2.5kg for upper body', incResult.nextWeight === 42.5, incResult);
+
+const decSession = { date: '2026-08-01', goal: 'hypertrophy', type: 'hypertrophy', sets: [{ weight: 40, reps: 5, rpe: 9 }] };
+const decResult = computeProgression({ lastSession: decSession, exerciseName: 'Bench Press', unit: 'kg' });
+assert('progression: missed bottom of range -> decrease', decResult.decision === 'decrease', decResult);
+assert('progression: ~8% back-off rounds to nearest plate', decResult.nextWeight === Math.round((40 * 0.92) / 2.5) * 2.5, decResult);
+
+const holdSession = { date: '2026-08-01', goal: 'hypertrophy', type: 'hypertrophy', sets: [{ weight: 40, reps: 9, rpe: 8 }] };
+const holdResult = computeProgression({ lastSession: holdSession, exerciseName: 'Bench Press', unit: 'kg' });
+assert('progression: mid-range reps -> hold (chase reps first)', holdResult.decision === 'hold', holdResult);
+
+const rpeHighSession = { date: '2026-08-01', goal: 'hypertrophy', type: 'hypertrophy', sets: [{ weight: 40, reps: 8, rpe: 9.5 }, { weight: 40, reps: 8, rpe: 9.5 }] };
+const rpeHighResult = computeProgression({ lastSession: rpeHighSession, exerciseName: 'Bench Press', unit: 'kg' });
+assert('progression: avg RPE >= 9.5 -> decrease even if reps were fine', rpeHighResult.decision === 'decrease', rpeHighResult);
+
+const seedResult = computeProgression({ lastSession: null, exerciseName: 'Bench Press', unit: 'kg' });
+assert('progression: no history -> seed baseline', seedResult.decision === 'seed', seedResult);
+
+// --- readiness ---
+assert('readiness: 0 days -> recovering', classifyReadiness(0).status === 'recovering');
+assert('readiness: 1 day -> recovering', classifyReadiness(1).status === 'recovering');
+assert('readiness: 2 days -> optimal', classifyReadiness(2).status === 'optimal');
+assert('readiness: 4 days -> optimal', classifyReadiness(4).status === 'optimal');
+assert('readiness: 5 days -> ready', classifyReadiness(5).status === 'ready');
+assert('readiness: 10 days -> ready', classifyReadiness(10).status === 'ready');
+assert('readiness: 11 days -> layoff', classifyReadiness(11).status === 'layoff');
+assert('readiness: null (never trained) -> new', classifyReadiness(null).status === 'new');
+
+// --- periodization ---
+const fewLogs = [{ date: daysAgo(3), exerciseName: 'Bench Press', type: 'hypertrophy', goal: 'hypertrophy', sets: [{ weight: 40, reps: 9, rpe: 8 }] }];
+const recFew = recommendSessionType({ exerciseName: 'Bench Press', logs: fewLogs, muscleGroupReadiness: { status: 'ready' } });
+assert('periodization: <2 hypertrophy sessions -> hypertrophy', recFew.type === 'hypertrophy', recFew);
+
+const enoughLogs = [
+  { date: daysAgo(20), exerciseName: 'Bench Press', type: 'hypertrophy', goal: 'hypertrophy', sets: [{ weight: 40, reps: 9, rpe: 8 }] },
+  { date: daysAgo(15), exerciseName: 'Bench Press', type: 'hypertrophy', goal: 'hypertrophy', sets: [{ weight: 40, reps: 9, rpe: 8 }] },
+];
+const recReady = recommendSessionType({ exerciseName: 'Bench Press', logs: enoughLogs, muscleGroupReadiness: { status: 'ready' } });
+assert('periodization: 2+ hyp sessions, no prior test, not recovering -> strength', recReady.type === 'strength', recReady);
+
+const recoveringOverride = recommendSessionType({ exerciseName: 'Bench Press', logs: enoughLogs, muscleGroupReadiness: { status: 'recovering' } });
+assert('periodization: eligible but muscle group recovering -> stays hypertrophy', recoveringOverride.type === 'hypertrophy', recoveringOverride);
+
+const recentTestLogs = enoughLogs.concat([{ date: daysAgo(5), exerciseName: 'Bench Press', type: 'strength', goal: 'strength', sets: [{ weight: 60, reps: 1, rpe: 9 }] }]);
+const recCountdown = recommendSessionType({ exerciseName: 'Bench Press', logs: recentTestLogs, muscleGroupReadiness: { status: 'ready' } });
+assert('periodization: strength test 5 days ago -> countdown, stays hypertrophy', recCountdown.type === 'hypertrophy' && recCountdown.reason.includes('9 more day'), recCountdown);
+
+// --- plan generator ---
+assert('epley1RM: basic formula', Math.abs(epley1RM(100, 5) - 100 * (1 + 5 / 30)) < 0.001);
+assert('epley1RM: caps at 12 reps for accuracy', epley1RM(100, 20) === epley1RM(100, 12));
+
+const hypPlan = generateHypertrophyPlan({ nextWeight: 50, setCount: 3, goal: 'hypertrophy' });
+assert('hypertrophy plan: set count matches request', hypPlan.sets.length === 3);
+assert('hypertrophy plan: target reps = midpoint(6-12) = 9', hypPlan.sets[0].targetReps === 9, hypPlan.sets);
+assert('hypertrophy plan: last set flagged as AMRAP/failure set', hypPlan.sets[2].note.toLowerCase().includes('failure'));
+assert('hypertrophy plan: all sets at the same working weight', hypPlan.sets.every((s) => s.weight === 50));
+
+const strPlan = generateStrengthTestPlan({
+  recentHypertrophySessions: [{ sets: [{ weight: 100, reps: 8, rpe: 8 }] }, { sets: [{ weight: 95, reps: 10, rpe: 7 }] }],
+  unit: 'kg',
+});
+assert('strength plan: 8 sets (4 warm-up + 1 single + 3 back-off)', strPlan.sets.length === 8, strPlan.sets.length);
+assert('strength plan: 1RM estimated from the best recent working set', Math.abs(strPlan.estimated1RM - epley1RM(100, 8)) < 0.001, strPlan.estimated1RM);
+assert('strength plan: working single ~102% of e1RM, rounded to plate', strPlan.workingSingle === roundToPlate(strPlan.estimated1RM * 1.02, 'kg'));
+assert('strength plan: final back-off set flagged near failure', strPlan.sets[7].note.toLowerCase().includes('failure'));
+assert('strength plan: includes the 1RM-estimate caveat', !!strPlan.caveat && strPlan.caveat.length > 0);
+
+// --- readiness override + hypertrophy/strength cross-contamination (plan.js orchestration) ---
+const exerciseMeta = { 'Back Squat': 'quads' };
+const today = todayStr();
+const recoveryLogs = [
+  { date: today, exerciseName: 'Back Squat', type: 'hypertrophy', goal: 'hypertrophy', muscleGroup: 'quads', unit: 'kg',
+    sets: [{ weight: 100, reps: 12, rpe: 7 }, { weight: 100, reps: 12, rpe: 7 }, { weight: 100, reps: 12, rpe: 7 }] },
+];
+const overridePlan = buildTodaysPlan({ exerciseName: 'Back Squat', muscleGroup: 'quads', goal: 'hypertrophy', sessionTypeOverride: 'hypertrophy', logs: recoveryLogs, exerciseMeta, profile: { unit: 'kg' } });
+assert('readiness override: hit top of range but trained today -> hold-override, not increase', overridePlan.progression.decision === 'hold-override', overridePlan.progression);
+assert('readiness override: plan weight holds at last working weight (100kg)', overridePlan.plan.sets[0].weight === 100, overridePlan.plan.sets);
+
+const readyLogs = [
+  { date: daysAgo(7), exerciseName: 'Back Squat', type: 'hypertrophy', goal: 'hypertrophy', muscleGroup: 'quads', unit: 'kg',
+    sets: [{ weight: 100, reps: 12, rpe: 7 }, { weight: 100, reps: 12, rpe: 7 }, { weight: 100, reps: 12, rpe: 7 }] },
+];
+const readyPlan = buildTodaysPlan({ exerciseName: 'Back Squat', muscleGroup: 'quads', goal: 'hypertrophy', sessionTypeOverride: 'hypertrophy', logs: readyLogs, exerciseMeta, profile: { unit: 'kg' } });
+assert('readiness ready: increase applies normally (+5kg lower body)', readyPlan.progression.decision === 'increase' && readyPlan.plan.sets[0].weight === 105, readyPlan.plan.sets);
+
+const contaminationLogs = [
+  { date: daysAgo(9), exerciseName: 'Back Squat', type: 'hypertrophy', goal: 'hypertrophy', unit: 'kg', muscleGroup: 'quads',
+    sets: [{ weight: 100, reps: 12, rpe: 7 }, { weight: 100, reps: 12, rpe: 7 }, { weight: 100, reps: 12, rpe: 7 }] },
+  { date: daysAgo(2), exerciseName: 'Back Squat', type: 'strength', goal: 'strength', unit: 'kg', muscleGroup: 'quads',
+    sets: [{ weight: 40, reps: 5, rpe: 6 }, { weight: 60, reps: 3, rpe: 6 }, { weight: 75, reps: 2, rpe: 7 }, { weight: 85, reps: 1, rpe: 8 },
+      { weight: 140, reps: 1, rpe: 9 }, { weight: 119, reps: 4, rpe: 8 }, { weight: 119, reps: 4, rpe: 8 }, { weight: 119, reps: 3, rpe: 9 }] },
+];
+const nextPlan = buildTodaysPlan({ exerciseName: 'Back Squat', muscleGroup: 'quads', goal: 'hypertrophy', sessionTypeOverride: 'hypertrophy', logs: contaminationLogs, exerciseMeta, profile: { unit: 'kg' } });
+assert('bug fix: a strength-test single does not contaminate hypertrophy progression', nextPlan.progression.decision === 'increase' && nextPlan.plan.sets[0].weight === 105, nextPlan.plan);
+assert('bug fix: default set count comes from the hypertrophy session (3), not the strength test (8)', nextPlan.plan.sets.length === 3, nextPlan.plan.sets.length);
+
+const kgLogs = [{ date: daysAgo(5), exerciseName: 'Bench Press', type: 'hypertrophy', goal: 'hypertrophy', unit: 'kg', muscleGroup: 'chest',
+  sets: [{ weight: 100, reps: 12, rpe: 7 }, { weight: 100, reps: 12, rpe: 7 }] }];
+const lbPlan = buildTodaysPlan({ exerciseName: 'Bench Press', muscleGroup: 'chest', goal: 'hypertrophy', sessionTypeOverride: 'hypertrophy', logs: kgLogs, exerciseMeta: { 'Bench Press': 'chest' }, profile: { unit: 'lb' } });
+const expectedWorkingLb = convertWeight(100, 'kg', 'lb');
+assert('bug fix: a kg session converts before lb progression math (not read as raw 100lb)', Math.abs((lbPlan.progression.nextWeight - 5) - expectedWorkingLb) < 1, { nextWeight: lbPlan.progression.nextWeight, expectedWorkingLb });
+
+// --- plate stack ---
+const plateHtml = renderPlateStack(100, 'kg');
+assert('plate stack: 100kg breaks into 25kg + 15kg per side (bar 20kg + 2x40kg = 100kg)', plateHtml.includes('25') && plateHtml.includes('15') && plateHtml.includes('Per side'), plateHtml);
+assert('plate stack: handles a null target weight gracefully', renderPlateStack(null, 'kg').includes('No target weight'));
+
+// --- progress charts (DOM-producing, no iframe needed) ---
+const sandbox = document.getElementById('chart-sandbox');
+const weightPoints = [
+  { date: '2026-07-01', value: 60 },
+  { date: '2026-07-08', value: 62.5 },
+  { date: '2026-07-15', value: 62.5 },
+];
+renderWeightTrendChart(sandbox, weightPoints, 'kg');
+assert('weight trend chart: renders one point per data point', sandbox.querySelectorAll('circle.chart-hit').length === weightPoints.length);
+assert('weight trend chart: line path is present', !!sandbox.querySelector('path'));
+
+const volumePoints = [
+  { date: '2026-07-01', value: 1400 },
+  { date: '2026-07-08', value: 1600 },
+];
+renderVolumeChart(sandbox, volumePoints, 'kg');
+assert('volume chart: renders one bar per session', sandbox.querySelectorAll('rect.chart-bar').length === volumePoints.length);
+
+renderWeightTrendChart(sandbox, [{ date: '2026-07-01', value: 60 }], 'kg');
+assert('weight trend chart: single point shows an empty-state message, not a broken chart', sandbox.textContent.includes('Not enough sessions'));
+
+report();
+</script>
+</body></html>

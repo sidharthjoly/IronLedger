@@ -395,6 +395,64 @@ table.ledger-table {
 
 .plate-stack-note .dim { color: var(--text-faint); }
 
+/* ---------------- Charts ---------------- */
+
+.chart-section { display: flex; flex-direction: column; gap: 18px; margin: 14px 0; }
+
+.chart-title {
+  font-family: var(--font-display);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  margin: 0 0 6px;
+}
+
+.chart-container { position: relative; width: 100%; }
+
+.chart-svg { width: 100%; height: auto; display: block; overflow: visible; }
+
+.chart-axis-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--text-faint);
+}
+
+.chart-crosshair.hidden { display: none; }
+
+.chart-hit { cursor: crosshair; }
+
+.chart-bar { cursor: pointer; transition: filter 0.1s; }
+.chart-bar-active { filter: brightness(1.25); }
+
+.chart-tooltip {
+  display: none;
+  position: absolute;
+  pointer-events: none;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 6px 9px;
+  z-index: 10;
+  white-space: nowrap;
+}
+
+.chart-tooltip-value {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.chart-tooltip-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 1px;
+}
+
+.chart-empty { color: var(--text-faint); font-size: 12px; padding: 20px 0; text-align: center; }
+
 /* ---------------- History ---------------- */
 
 .history-controls { margin-bottom: 10px; }

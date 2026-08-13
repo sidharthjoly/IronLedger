@@ -1,5 +1,7 @@
 # Iron Ledger
 
+[![tests](https://github.com/SidharthJoly/IronLedger/actions/workflows/tests.yml/badge.svg)](https://github.com/SidharthJoly/IronLedger/actions/workflows/tests.yml)
+
 A personal strength-training log that tells you exactly what to lift next
 session — full set-by-set prescriptions, not just one number — instead of
 just recording what you did.
@@ -25,10 +27,15 @@ back an actual plan:
   sets), on its own cadence.
 - **Plate-loading visual** — renders the prescribed weight as a stack of
   plates, biggest closest to the collar, the way you'd actually load the bar.
+- **Progress charts** — a working-weight trend line (hypertrophy sessions
+  only — a strength test's near-1RM single is a different kind of number and
+  would otherwise read as a spike) and a per-session volume-load bar chart.
 
 Every recommendation shows its reasoning in plain text, and the app is
 explicit that this is a general heuristic, not personalized medical or
-coaching advice — it doesn't know your sleep, stress, or injury history.
+coaching advice — it doesn't know your sleep, stress, or injury history. See
+[METHODOLOGY.md](METHODOLOGY.md) for the sports-science background behind
+each heuristic and its citations.
 
 ## Stack
 
@@ -46,6 +53,23 @@ python3 -m http.server 8000
 
 then open `http://localhost:8000`.
 
+## Testing
+
+No test framework or Node dependency — tests are plain HTML pages
+(`tests/unit.html`, `tests/dom.html`) that assert into the DOM and run in a
+real browser, headless in CI:
+
+```
+bash tests/run.sh
+```
+
+`tests/unit.html` exercises every heuristic module directly (progression,
+readiness, periodization, the strength/hypertrophy plan generator, the
+exercise-library guesser, unit conversion, the plate stack and progress
+charts). `tests/dom.html` drives the actual app end to end in an iframe —
+selecting an exercise, logging sessions, and checking what lands in
+`localStorage` and the rendered DOM.
+
 ## Data model
 
 - **Exercise entry** (per logged session): `{ date, goal, type, sets: [{ weight, reps, rpe }] }`
@@ -53,8 +77,11 @@ then open `http://localhost:8000`.
   ramping/pyramid sets, warm-ups, and drop sets.
 - **Exercise metadata**: muscle group, either picked from the built-in
   ~90-exercise library or guessed from the exercise name.
-- **Profile** (optional): bodyweight, height, units — used only for the
-  plate-loading display, never required.
+- **Profile** (optional, never required): bodyweight, height, and a kg/lb
+  unit toggle. Height is tracked in cm or in — paired with the weight unit's
+  metric/imperial convention, never literally reused as kg/lb. Bodyweight and
+  height are informational only right now; nothing in the app currently
+  calculates from them.
 
 All data stays in the browser's `localStorage`; nothing is sent anywhere.
 

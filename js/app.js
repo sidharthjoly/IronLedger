@@ -7,7 +7,9 @@ import { buildTodaysPlan } from './lib/plan.js';
 import { getMuscleGroupReadiness } from './lib/readiness.js';
 import { recommendSessionType } from './lib/periodization.js';
 import { renderPlateStack } from './components/plateStack.js';
+import { renderWeightTrendChart, renderVolumeChart } from './components/progressChart.js';
 import { formatWeight, convertWeight } from './lib/units.js';
+import { getWorkingSets } from './lib/progression.js';
 import { todayStr, formatDateDisplay } from './lib/dateUtils.js';
 
 // ---------------------------------------------------------------------------
@@ -53,6 +55,10 @@ const saveStatusEl = document.getElementById('save-status');
 const historyExerciseSelect = document.getElementById('history-exercise-select');
 const historyTableBody = document.getElementById('history-table-body');
 const historyEmptyEl = document.getElementById('history-empty');
+const chartSectionEl = document.getElementById('chart-section');
+const chartEmptyEl = document.getElementById('chart-empty');
+const weightTrendChartEl = document.getElementById('weight-trend-chart');
+const volumeChartEl = document.getElementById('volume-chart');
 
 const profileBodyweight = document.getElementById('profile-bodyweight');
 const profileHeight = document.getElementById('profile-height');
@@ -449,6 +455,62 @@ function renderHistoryTable(exerciseName) {
       </tr>`;
     })
     .join('');
+
+  renderHistoryCharts(exerciseName);
+}
+
+function computeChartPoints(exerciseName) {
+  const currentUnit = profile.unit || 'kg';
+  const ascending = logs
+    .filter((l) => l.exerciseName === exerciseName)
+    .slice()
+    .sort((a, b) => (a.date > b.date ? 1 : -1));
+
+  // Working-weight trend is a hypertrophy-day concept (the submaximal weight
+  // double progression tracks) — mixing in a strength test's near-1RM single
+  // would read as a wild spike, the same cross-contamination bug already
+  // fixed in the progression engine itself.
+  const weightTrendPoints = ascending
+    .filter((l) => l.type === 'hypertrophy')
+    .map((l) => {
+      const loggedUnit = l.unit || currentUnit;
+      const convertedSets = l.sets.map((s) => ({ ...s, weight: convertWeight(s.weight, loggedUnit, currentUnit) }));
+      const working = getWorkingSets(convertedSets);
+      if (working.length === 0) return null;
+      return { date: l.date, value: Math.round(working[0].weight * 100) / 100 };
+    })
+    .filter(Boolean);
+
+  // Volume load (Σ weight×reps) is additive and comparable across session
+  // types, so it includes both hypertrophy and strength-test sessions.
+  const volumePoints = ascending.map((l) => {
+    const loggedUnit = l.unit || currentUnit;
+    const volume = l.sets.reduce((sum, s) => sum + convertWeight(s.weight, loggedUnit, currentUnit) * (Number(s.reps) || 0), 0);
+    return { date: l.date, value: Math.round(volume) };
+  });
+
+  return { weightTrendPoints, volumePoints, unit: currentUnit };
+}
+
+function renderHistoryCharts(exerciseName) {
+  if (!exerciseName) {
+    chartSectionEl.classList.add('hidden');
+    chartEmptyEl.classList.add('hidden');
+    return;
+  }
+
+  const { weightTrendPoints, volumePoints, unit } = computeChartPoints(exerciseName);
+
+  if (volumePoints.length < 2) {
+    chartSectionEl.classList.add('hidden');
+    chartEmptyEl.classList.remove('hidden');
+    return;
+  }
+  chartEmptyEl.classList.add('hidden');
+  chartSectionEl.classList.remove('hidden');
+
+  renderWeightTrendChart(weightTrendChartEl, weightTrendPoints, unit);
+  renderVolumeChart(volumeChartEl, volumePoints, unit);
 }
 
 // ---------------------------------------------------------------------------
