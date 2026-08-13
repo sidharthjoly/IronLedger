@@ -293,6 +293,10 @@ function updateProfileUnitLabels() {
   const unit = profileUnit.value;
   bodyweightUnitLabel.textContent = unit;
   heightUnitLabel.textContent = unit === 'lb' ? 'in' : 'cm';
+  // The step also has to follow the unit, not just the label — 0.1 makes
+  // sense for neither: cm is normally read to the nearest whole centimeter,
+  // and inches to the nearest half at most.
+  profileHeight.step = unit === 'lb' ? '0.5' : '1';
 }
 
 // ---------------------------------------------------------------------------
