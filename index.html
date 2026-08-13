@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Iron Ledger — Strength Training Tracker</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="plate-mark"></div>
+    <div>
+      <h1>IRON <span>LEDGER</span></h1>
+      <div class="tagline">strength log &amp; progression planner</div>
+    </div>
+  </header>
+
+  <main>
+    <div class="col-main">
+      <!-- Exercise picker + Today's Plan -->
+      <section class="card" id="planner-card">
+        <h2>Today&rsquo;s Plan</h2>
+
+        <div class="exercise-picker">
+          <label for="exercise-input">Exercise</label>
+          <input id="exercise-input" placeholder="Search the library or type a custom exercise…" autocomplete="off" />
+          <div class="suggestions" id="exercise-suggestions"></div>
+        </div>
+
+        <div class="field-row">
+          <div>
+            <label for="muscle-group-select">Muscle Group</label>
+            <select id="muscle-group-select"></select>
+          </div>
+          <div>
+            <label for="goal-select">Goal</label>
+            <select id="goal-select">
+              <option value="strength">Strength (3–6 reps)</option>
+              <option value="hypertrophy" selected>Hypertrophy (6–12 reps)</option>
+              <option value="endurance">Endurance (12–20 reps)</option>
+            </select>
+          </div>
+          <div>
+            <label for="session-type-select">Session Type</label>
+            <select id="session-type-select">
+              <option value="hypertrophy">Hypertrophy Day</option>
+              <option value="strength">Strength Test Day</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="plan-empty" class="empty-state">Pick or type an exercise above to see today&rsquo;s recommended plan.</div>
+
+        <div id="today-plan" class="hidden">
+          <div class="rec-block">
+            <div class="rec-item">
+              <span class="tag" id="session-type-badge"></span>
+              <p id="session-reason"></p>
+            </div>
+            <div class="rec-item">
+              <span class="tag" id="readiness-badge"></span>
+              <p id="readiness-reason"></p>
+            </div>
+            <div class="rec-item">
+              <span class="tag" id="progression-badge"></span>
+              <p id="progression-reason"></p>
+            </div>
+            <p class="disclaimer">This is a general recovery-time guideline, not a personalized fatigue measurement — real recovery depends on sleep, stress, and training history the app doesn&rsquo;t track.</p>
+          </div>
+
+          <div class="plate-preview" id="plate-preview"></div>
+
+          <table class="ledger-table" id="plan-table">
+            <thead>
+              <tr><th>Set</th><th>Weight</th><th>Reps</th><th>Note</th></tr>
+            </thead>
+            <tbody id="plan-table-body"></tbody>
+          </table>
+
+          <div id="plan-caveat"></div>
+        </div>
+      </section>
+
+      <!-- Log form -->
+      <section class="card" id="log-form-card">
+        <h2>Log This Session</h2>
+        <div class="log-controls">
+          <div>
+            <label for="set-count">Sets</label>
+            <input type="number" id="set-count" min="1" max="10" value="3" />
+          </div>
+          <button type="button" class="secondary" id="use-plan-btn">Use Plan Weights</button>
+          <button type="button" class="secondary" id="add-set-btn">+ Set</button>
+        </div>
+
+        <div class="sets-grid" id="sets-grid-header">
+          <div class="set-row" style="border-bottom:1px solid var(--border); padding-bottom:6px;">
+            <span></span>
+            <label style="margin:0;">Weight</label>
+            <label style="margin:0;">Reps</label>
+            <label style="margin:0;">RPE</label>
+            <span></span>
+          </div>
+        </div>
+        <div class="sets-grid" id="sets-grid"></div>
+
+        <div class="save-row">
+          <button type="button" id="save-session-btn">Save Session</button>
+          <span class="save-status" id="save-status"></span>
+        </div>
+      </section>
+    </div>
+
+    <div class="col-side">
+      <!-- History -->
+      <section class="card" id="history-card">
+        <h2>History Ledger</h2>
+        <div class="history-controls">
+          <label for="history-exercise-select">Exercise</label>
+          <select id="history-exercise-select"></select>
+        </div>
+        <table class="ledger-table" id="history-table">
+          <thead>
+            <tr><th>Date</th><th>Type</th><th>Sets</th><th>Avg RPE</th></tr>
+          </thead>
+          <tbody id="history-table-body"></tbody>
+        </table>
+        <div id="history-empty" class="empty-state hidden">No sessions logged for this exercise yet.</div>
+      </section>
+
+      <!-- Profile -->
+      <section class="card" id="profile-card">
+        <h2>Profile <span class="optional-tag">optional</span></h2>
+        <div class="field-row">
+          <div>
+            <label for="profile-bodyweight">Bodyweight</label>
+            <input type="number" id="profile-bodyweight" step="0.1" placeholder="—" />
+          </div>
+          <div>
+            <label for="profile-height">Height</label>
+            <input type="number" id="profile-height" step="0.1" placeholder="—" />
+          </div>
+          <div>
+            <label for="profile-unit">Units</label>
+            <select id="profile-unit">
+              <option value="kg">kg</option>
+              <option value="lb">lb</option>
+            </select>
+          </div>
+        </div>
+        <button type="button" class="secondary" id="save-profile-btn">Save Profile</button>
+        <p class="profile-note">Only used for the plate-loading display and unit conversion — nothing here is required to use the tracker.</p>
+      </section>
+    </div>
+  </main>
+
+  <footer>
+    Iron Ledger — heuristic progression guidance, not personalized medical or coaching advice. Data stays in this browser (localStorage) only.
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
