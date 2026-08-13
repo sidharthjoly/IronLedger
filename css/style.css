@@ -65,7 +65,7 @@ a { color: var(--accent); }
   border-bottom: 1px solid var(--border);
   padding: 22px 24px 18px;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 14px;
   flex-wrap: wrap;
   background: linear-gradient(180deg, var(--bg-elevated), var(--bg));
