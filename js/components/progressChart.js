@@ -6,10 +6,14 @@
 // empty space.
 
 const NS = 'http://www.w3.org/2000/svg';
-const ACCENT = '#e8b93f';
-const GRID = 'rgba(233, 230, 221, 0.10)';
-const TEXT_DIM = '#9a9c9f';
-const SURFACE = '#1b1d22';
+const ACCENT = '#E84A00';
+// The volume bar chart uses the secondary teal rather than the primary
+// orange — differentiates it from the trend line at a glance, matching how
+// the design language elsewhere pairs orange (primary) with teal (info).
+const VOLUME_COLOR = '#006289';
+const GRID = 'rgba(232, 74, 0, 0.14)';
+const TEXT_DIM = 'color-mix(in oklch, #006289 35%, white)';
+const SURFACE = 'color-mix(in oklch, #004759 70%, black)';
 
 const PADDING = { top: 16, right: 16, bottom: 28, left: 44 };
 const WIDTH = 560;
@@ -215,7 +219,7 @@ export function renderVolumeChart(container, points, unit) {
     const x = xFor(i) - barWidth / 2;
     const y = yFor(p.value);
     const h = Math.max(0, baselineY - y);
-    const rect = svgEl('rect', { x, y, width: barWidth, height: h, rx: 4, fill: ACCENT, class: 'chart-bar' });
+    const rect = svgEl('rect', { x, y, width: barWidth, height: h, rx: 4, fill: VOLUME_COLOR, class: 'chart-bar' });
     svg.appendChild(rect);
     bars.push({ el: rect, point: p });
   });

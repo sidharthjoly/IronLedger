@@ -1,29 +1,32 @@
 /* ---------------------------------------------------------------------------
-   IRON LEDGER — design system
-   Industrial gym-logbook aesthetic: dark graphite, chalk-white text, a
-   calibrated-plate yellow accent, muted red for "back off" warnings.
-   Oswald for display/headers, a monospace face for all numeric data.
+   IRON LEDGER — design system ("MoMA" redesign)
+   Deep teal ground, burnt-orange primary accent, maroon for warnings — a
+   museum-poster triad in place of the original graphite/yellow logbook look.
+   Archivo Black for the wordmark, Oswald for section headers, a monospace
+   face for all numeric data.
 --------------------------------------------------------------------------- */
 
-@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Oswald:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
 :root {
-  --bg: #121316;
-  --bg-elevated: #1b1d22;
-  --bg-inset: #0e0f12;
-  --border: rgba(233, 230, 221, 0.10);
-  --border-strong: rgba(233, 230, 221, 0.20);
-  --text: #e9e6dd;
-  --text-dim: #9a9c9f;
-  --text-faint: #6b6d70;
-  --accent: #e8b93f;
-  --accent-dim: #b8901f;
-  --accent-text: #1a1400;
-  --warn: #c1443c;
-  --warn-dim: rgba(193, 68, 60, 0.15);
-  --good: #6fae62;
-  --good-dim: rgba(111, 174, 98, 0.15);
+  --bg: color-mix(in oklch, #004759 38%, black);
+  --bg-elevated: color-mix(in oklch, #004759 70%, black);
+  --bg-inset: color-mix(in oklch, #004759 25%, black);
+  --border: rgba(232, 74, 0, 0.14);
+  --border-strong: rgba(232, 74, 0, 0.25);
+  --text: color-mix(in oklch, #E84A00 6%, white);
+  --text-dim: color-mix(in oklch, #006289 35%, white);
+  --text-faint: color-mix(in oklch, #004759 45%, white);
+  --accent: #E84A00;
+  --accent-dim: #BB1D2C;
+  --accent-text: #ffffff;
+  --warn: #9B0C43;
+  --warn-dim: rgba(155, 12, 67, 0.15);
+  --warn-text: color-mix(in oklch, #9B0C43 40%, white);
+  --good: #006289;
+  --good-dim: rgba(0, 98, 137, 0.18);
   --font-display: 'Oswald', 'Arial Narrow', sans-serif;
+  --font-wordmark: 'Archivo Black', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --radius: 6px;
 }
@@ -43,7 +46,7 @@ html, body {
 body {
   min-height: 100vh;
   background-image:
-    linear-gradient(180deg, rgba(232, 185, 63, 0.04), transparent 240px);
+    linear-gradient(180deg, rgba(232, 74, 0, 0.05), transparent 240px);
 }
 
 h1, h2, h3, .display {
@@ -105,20 +108,27 @@ a { color: var(--accent); }
 .migrate-actions { display: flex; gap: 8px; }
 .migrate-actions button { font-size: 12px; padding: 6px 10px; width: auto; }
 
-.app-header .plate-mark {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  border: 4px solid var(--accent);
-  background: repeating-radial-gradient(circle, var(--bg-inset) 0 2px, transparent 2px 100%);
+.brand-mark {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  background: var(--bg-inset);
   flex-shrink: 0;
+  overflow: hidden;
 }
 
+.brand-mark .bar { position: absolute; left: 9px; top: 6px; width: 9px; height: 28px; background: var(--accent); }
+.brand-mark .line { position: absolute; left: 0; right: 0; top: 27px; height: 3px; background: var(--warn); }
+.brand-mark .dot { position: absolute; right: 6px; top: 6px; width: 6px; height: 6px; background: var(--good); }
+
 .app-header h1 {
-  font-size: 26px;
+  font-family: var(--font-wordmark);
+  font-weight: 400;
+  font-size: 24px;
   margin: 0;
   color: var(--text);
-  letter-spacing: 0.08em;
+  letter-spacing: -0.01em;
 }
 
 .app-header h1 span { color: var(--accent); }
@@ -259,7 +269,7 @@ button.danger { background: var(--warn); color: var(--text); }
   font-size: 13px;
 }
 
-.suggestion-item:hover, .suggestion-item.active { background: rgba(232, 185, 63, 0.12); }
+.suggestion-item:hover, .suggestion-item.active { background: rgba(232, 74, 0, 0.12); }
 
 .suggestion-item .mg-tag {
   color: var(--text-faint);
@@ -281,15 +291,15 @@ button.danger { background: var(--warn); color: var(--text); }
   margin-bottom: 6px;
 }
 
-.tag-hypertrophy { background: rgba(232, 185, 63, 0.15); color: var(--accent); border: 1px solid var(--accent-dim); }
-.tag-strength { background: var(--warn-dim); color: #e08a83; border: 1px solid var(--warn); }
+.tag-hypertrophy { background: rgba(232, 74, 0, 0.15); color: var(--accent); border: 1px solid var(--accent-dim); }
+.tag-strength { background: var(--warn-dim); color: var(--warn-text); border: 1px solid var(--warn); }
 .tag-new { background: rgba(255,255,255,0.06); color: var(--text-dim); border: 1px solid var(--border-strong); }
-.tag-recovering { background: var(--warn-dim); color: #e08a83; border: 1px solid var(--warn); }
-.tag-optimal { background: var(--good-dim); color: #9bd18d; border: 1px solid var(--good); }
-.tag-ready { background: var(--good-dim); color: #9bd18d; border: 1px solid var(--good); }
+.tag-recovering { background: var(--warn-dim); color: var(--warn-text); border: 1px solid var(--warn); }
+.tag-optimal { background: var(--good-dim); color: var(--text-dim); border: 1px solid var(--good); }
+.tag-ready { background: var(--good-dim); color: var(--text-dim); border: 1px solid var(--good); }
 .tag-layoff { background: rgba(255,255,255,0.06); color: var(--text-dim); border: 1px solid var(--border-strong); }
-.tag-increase { background: var(--good-dim); color: #9bd18d; border: 1px solid var(--good); }
-.tag-decrease { background: var(--warn-dim); color: #e08a83; border: 1px solid var(--warn); }
+.tag-increase { background: var(--good-dim); color: var(--text-dim); border: 1px solid var(--good); }
+.tag-decrease { background: var(--warn-dim); color: var(--warn-text); border: 1px solid var(--warn); }
 .tag-hold, .tag-hold-override { background: rgba(255,255,255,0.06); color: var(--text-dim); border: 1px solid var(--border-strong); }
 .tag-seed { background: rgba(255,255,255,0.06); color: var(--text-dim); border: 1px solid var(--border-strong); }
 
@@ -310,7 +320,7 @@ button.danger { background: var(--warn); color: var(--text); }
 .caveat {
   font-size: 12px;
   color: var(--accent);
-  background: rgba(232, 185, 63, 0.08);
+  background: rgba(232, 74, 0, 0.08);
   border-left: 2px solid var(--accent);
   padding: 8px 10px;
   margin-top: 10px;
@@ -344,7 +354,7 @@ table.ledger-table {
 }
 
 .ledger-table tr.set-amrap td { color: var(--accent); }
-.ledger-table tr.set-backoff td { color: #e08a83; }
+.ledger-table tr.set-backoff td { color: var(--warn); }
 .ledger-table .set-note { font-size: 11px; color: var(--text-dim); font-family: var(--font-mono); }
 
 /* ---------------- Sets grid (log form) ---------------- */
@@ -383,7 +393,7 @@ table.ledger-table {
 .save-row { margin-top: 14px; display: flex; gap: 10px; align-items: center; }
 
 .editing-banner {
-  background: rgba(232, 185, 63, 0.08);
+  background: rgba(232, 74, 0, 0.08);
   border-left: 2px solid var(--accent);
   color: var(--accent);
   font-size: 12px;
@@ -406,14 +416,14 @@ table.ledger-table {
 .bar-sleeve {
   width: 26px;
   height: 14px;
-  background: linear-gradient(180deg, #555, #2a2a2a);
+  background: linear-gradient(180deg, color-mix(in oklch, #006289 55%, white), color-mix(in oklch, #004759 25%, black));
   border-radius: 2px;
   flex-shrink: 0;
 }
 
 .plate {
   width: 16px;
-  background: linear-gradient(180deg, #3a3d43, #202226);
+  background: linear-gradient(180deg, color-mix(in oklch, #006289 35%, black), color-mix(in oklch, #004759 20%, black));
   border: 1px solid var(--border-strong);
   border-radius: 2px;
   display: flex;
