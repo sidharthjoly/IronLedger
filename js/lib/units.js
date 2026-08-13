@@ -27,3 +27,31 @@ export function formatWeight(weight, unit) {
   const rounded = Math.round(weight * 100) / 100;
   return `${rounded}${unit === 'lb' ? 'lb' : 'kg'}`;
 }
+
+const KG_PER_LB = 0.45359237;
+
+// Converts a weight logged under one unit into another. Needed because a
+// session's weight numbers are only meaningful alongside the unit they were
+// actually entered in — reusing them under today's currently-selected unit
+// without converting would silently treat e.g. "100" logged in lb as if it
+// were 100kg.
+export function convertWeight(weight, fromUnit, toUnit) {
+  if (weight === null || weight === undefined || Number.isNaN(weight)) return weight;
+  if (fromUnit === toUnit) return weight;
+  if (fromUnit === 'kg' && toUnit === 'lb') return weight / KG_PER_LB;
+  if (fromUnit === 'lb' && toUnit === 'kg') return weight * KG_PER_LB;
+  return weight;
+}
+
+// Re-expresses a logged session's sets in a target unit, defaulting the
+// session's own unit to `toUnit` for legacy entries logged before unit
+// tagging existed (treated as already being in the target unit).
+export function convertSessionToUnit(session, toUnit) {
+  if (!session) return session;
+  const fromUnit = session.unit || toUnit;
+  if (fromUnit === toUnit) return session;
+  return {
+    ...session,
+    sets: session.sets.map((s) => ({ ...s, weight: convertWeight(s.weight, fromUnit, toUnit) })),
+  };
+}

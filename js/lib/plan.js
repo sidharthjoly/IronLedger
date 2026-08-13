@@ -6,6 +6,7 @@ import { computeProgression } from './progression.js';
 import { getMuscleGroupReadiness } from './readiness.js';
 import { recommendSessionType } from './periodization.js';
 import { generateHypertrophyPlan, generateStrengthTestPlan, defaultSetCount } from './planGenerator.js';
+import { convertSessionToUnit } from './units.js';
 
 export function buildTodaysPlan({ exerciseName, muscleGroup, goal, sessionTypeOverride, logs, exerciseMeta, profile }) {
   const unit = profile.unit || 'kg';
@@ -13,7 +14,17 @@ export function buildTodaysPlan({ exerciseName, muscleGroup, goal, sessionTypeOv
     .filter((l) => l.exerciseName === exerciseName)
     .slice()
     .sort((a, b) => (a.date < b.date ? 1 : -1));
-  const lastSession = exerciseLogs[0] || null;
+
+  // Double progression is a hypertrophy-day concept: it tracks whether you're
+  // adding reps/weight at a submaximal working weight over time. A strength
+  // test's near-1RM single is a different kind of number entirely (1 rep, at
+  // ~102% of estimated max) — feeding it into the same rep-range check would
+  // read as "missed the bottom of the range" and back off from your near-max
+  // lift. So progression and default set count always look at the most recent
+  // hypertrophy-type session specifically, never just "the last session,"
+  // mirroring how the strength-test plan already sources its own history.
+  const lastHypertrophySessionRaw = exerciseLogs.find((l) => l.type === 'hypertrophy') || null;
+  const lastSession = convertSessionToUnit(lastHypertrophySessionRaw, unit);
 
   const readiness = getMuscleGroupReadiness(muscleGroup, logs, exerciseMeta);
   const sessionRec = recommendSessionType({ exerciseName, logs, muscleGroupReadiness: readiness });
@@ -37,7 +48,10 @@ export function buildTodaysPlan({ exerciseName, muscleGroup, goal, sessionTypeOv
 
   let plan;
   if (sessionType === 'strength') {
-    const recentHypertrophySessions = exerciseLogs.filter((l) => l.type === 'hypertrophy').slice(0, 3);
+    const recentHypertrophySessions = exerciseLogs
+      .filter((l) => l.type === 'hypertrophy')
+      .slice(0, 3)
+      .map((s) => convertSessionToUnit(s, unit));
     plan = generateStrengthTestPlan({ recentHypertrophySessions, unit });
   } else {
     plan = generateHypertrophyPlan({

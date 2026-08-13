@@ -7,7 +7,7 @@ import { buildTodaysPlan } from './lib/plan.js';
 import { getMuscleGroupReadiness } from './lib/readiness.js';
 import { recommendSessionType } from './lib/periodization.js';
 import { renderPlateStack } from './components/plateStack.js';
-import { formatWeight } from './lib/units.js';
+import { formatWeight, convertWeight } from './lib/units.js';
 import { todayStr, formatDateDisplay } from './lib/dateUtils.js';
 
 // ---------------------------------------------------------------------------
@@ -58,6 +58,8 @@ const profileBodyweight = document.getElementById('profile-bodyweight');
 const profileHeight = document.getElementById('profile-height');
 const profileUnit = document.getElementById('profile-unit');
 const saveProfileBtn = document.getElementById('save-profile-btn');
+const bodyweightUnitLabel = document.getElementById('bodyweight-unit-label');
+const heightUnitLabel = document.getElementById('height-unit-label');
 
 // ---------------------------------------------------------------------------
 // Init
@@ -74,6 +76,7 @@ function init() {
   profileBodyweight.value = profile.bodyweight ?? '';
   profileHeight.value = profile.height ?? '';
   profileUnit.value = profile.unit || 'kg';
+  updateProfileUnitLabels();
 
   buildBlankGrid(3);
   renderHistorySelectOptions();
@@ -127,6 +130,8 @@ function wireEvents() {
     renderHistoryTable(historyExerciseSelect.value || null);
   });
 
+  profileUnit.addEventListener('change', updateProfileUnitLabels);
+
   saveProfileBtn.addEventListener('click', () => {
     profile = {
       bodyweight: profileBodyweight.value ? Number(profileBodyweight.value) : null,
@@ -137,6 +142,15 @@ function wireEvents() {
     saveStatusFlash(saveProfileBtn, ok ? 'Saved.' : 'Save failed (storage unavailable).');
     if (currentExercise) recomputePlan();
   });
+}
+
+// Height is a length, not a weight — it never shares kg/lb's unit, so it
+// follows the conventional metric/imperial pairing (kg -> cm, lb -> in)
+// instead of literally reusing the weight unit.
+function updateProfileUnitLabels() {
+  const unit = profileUnit.value;
+  bodyweightUnitLabel.textContent = unit;
+  heightUnitLabel.textContent = unit === 'lb' ? 'in' : 'cm';
 }
 
 // ---------------------------------------------------------------------------
@@ -200,12 +214,16 @@ function recomputePlan({ resetSelectors = false } = {}) {
   const muscleGroup = muscleGroupSelect.value;
 
   if (resetSelectors) {
-    const exerciseLogs = logs.filter((l) => l.exerciseName === currentExercise);
-    const lastSession = exerciseLogs.slice().sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-    goalSelect.value = lastSession?.goal || 'hypertrophy';
+    // Default the goal dropdown from the last HYPERTROPHY-type session specifically —
+    // not just whatever session happened most recently. Otherwise a strength-test
+    // session (goal 'strength', 3-6 reps) would leak its rep-range goal onto the
+    // next hypertrophy day's default, mismatching the plan actually being built.
+    const exerciseLogs = logs.filter((l) => l.exerciseName === currentExercise).slice().sort((a, b) => (a.date < b.date ? 1 : -1));
+    const lastHypertrophySession = exerciseLogs.find((l) => l.type === 'hypertrophy');
     const readiness = getMuscleGroupReadiness(muscleGroup, logs, exerciseMeta);
     const rec = recommendSessionType({ exerciseName: currentExercise, logs, muscleGroupReadiness: readiness });
     sessionTypeSelect.value = rec.type;
+    goalSelect.value = rec.type === 'strength' ? 'strength' : (lastHypertrophySession?.goal || 'hypertrophy');
   }
 
   const result = buildTodaysPlan({
@@ -349,6 +367,7 @@ function saveSession() {
     goal: goalSelect.value,
     type: sessionTypeSelect.value,
     muscleGroup: muscleGroupSelect.value,
+    unit: profile.unit || 'kg',
     sets,
   };
 
@@ -408,9 +427,16 @@ function renderHistoryTable(exerciseName) {
   }
   historyEmptyEl.classList.add('hidden');
 
+  const currentUnit = profile.unit || 'kg';
   historyTableBody.innerHTML = rows
     .map((l) => {
-      const setsText = l.sets.map((s) => `${formatWeight(s.weight, profile.unit)}×${s.reps}`).join(', ');
+      // Convert into the currently-selected unit rather than relabeling raw
+      // numbers — a session logged in lb before a switch to kg must not be
+      // displayed as if the same number were kg.
+      const loggedUnit = l.unit || currentUnit;
+      const setsText = l.sets
+        .map((s) => `${formatWeight(convertWeight(s.weight, loggedUnit, currentUnit), currentUnit)}×${s.reps}`)
+        .join(', ');
       const rpeValues = l.sets.map((s) => s.rpe).filter((v) => v !== null && v !== undefined && v !== '');
       const avgRpe = rpeValues.length ? (rpeValues.reduce((a, b) => a + Number(b), 0) / rpeValues.length) : null;
       const typeLabel = l.type === 'strength' ? 'Strength Test' : 'Hypertrophy';
