@@ -9,7 +9,7 @@ import {
 } from './lib/storage.js';
 import {
   isSupabaseConfigured, hasCachedSupabaseSession, isOAuthRedirectInProgress,
-  getCurrentUser, signInWithGoogle, signOut,
+  getCurrentUser, signInWithGoogle, signOut, isAuthServiceReachable,
 } from './lib/supabaseClient.js';
 import { buildTodaysPlan } from './lib/plan.js';
 import { getMuscleGroupReadiness } from './lib/readiness.js';
@@ -288,6 +288,15 @@ function wireAuthEvents() {
       } finally {
         authActionBtn.disabled = false;
       }
+      return;
+    }
+    // Probe first: the OAuth redirect itself is a full-page navigation, so if
+    // the auth host is unreachable the visitor would land on a browser error
+    // page instead of staying here with their local data.
+    showAuthStatus('Checking cloud sync…', '');
+    if (!(await isAuthServiceReachable())) {
+      showAuthStatus('Cloud sync is unavailable right now. Your workouts are still saved in this browser.', 'sync-error');
+      authActionBtn.disabled = false;
       return;
     }
     showAuthStatus('Redirecting to Google…', '');

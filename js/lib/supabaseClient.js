@@ -41,6 +41,31 @@ export async function getCurrentUser() {
   return data.session?.user ?? null;
 }
 
+// signInWithOAuth() doesn't contact Supabase before redirecting: it just
+// navigates the whole page to <project>/auth/v1/authorize. If the auth host
+// is down or gone (a paused free-tier project's subdomain stops resolving
+// entirely), that strands the visitor on a browser DNS-error page, away from
+// their local data. A cheap health probe first lets the app stay put and say
+// so instead. A network error, a timeout or a non-2xx answer all count as
+// unreachable.
+export async function isAuthServiceReachable({ timeoutMs = 4000 } = {}) {
+  if (!isSupabaseConfigured()) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
+      headers: { apikey: SUPABASE_PUBLISHABLE_KEY },
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function signInWithGoogle() {
   const supabase = await getClient();
   // Google sign-in is a full-page redirect (no popup), so drop any leftover

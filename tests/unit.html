@@ -16,7 +16,7 @@ import { todayStr } from '../js/lib/dateUtils.js';
 import { renderPlateStack } from '../js/components/plateStack.js';
 import { renderWeightTrendChart, renderVolumeChart } from '../js/components/progressChart.js';
 import { appendSession, updateSession, deleteSession, loadLogs, countPendingSessions, setActiveUser, syncPendingSessions } from '../js/lib/storage.js';
-import { setSupabaseClientForTests } from '../js/lib/supabaseClient.js';
+import { setSupabaseClientForTests, isAuthServiceReachable } from '../js/lib/supabaseClient.js';
 
 const { assert, report } = makeRunner();
 
@@ -272,6 +272,21 @@ setActiveUser(null);
 setSupabaseClientForTests(null);
 localStorage.removeItem('gymapp:logs');
 localStorage.removeItem('gymapp:pendingSync');
+
+// --- supabaseClient.js: auth-host health probe (stubbed fetch) ---
+const realFetch = window.fetch;
+let probe = null;
+window.fetch = (url, opts) => {
+  probe = { url: String(url), apikey: opts?.headers?.apikey };
+  return Promise.resolve({ ok: true, status: 200 });
+};
+assert('auth probe: a 2xx health answer counts as reachable', (await isAuthServiceReachable()) === true);
+assert('auth probe: it hits /auth/v1/health with the publishable key', probe?.url.endsWith('/auth/v1/health') && probe?.apikey?.startsWith('sb_publishable_'), probe);
+window.fetch = () => Promise.resolve({ ok: false, status: 503 });
+assert('auth probe: a non-2xx answer counts as unreachable', (await isAuthServiceReachable()) === false);
+window.fetch = () => Promise.reject(new TypeError('Failed to fetch'));
+assert('auth probe: a network error (e.g. NXDOMAIN) counts as unreachable', (await isAuthServiceReachable()) === false);
+window.fetch = realFetch;
 
 // --- plate stack ---
 const plateHtml = renderPlateStack(100, 'kg');
