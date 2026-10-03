@@ -2,7 +2,7 @@
 
 [![tests](https://github.com/SidharthJoly/IronLedger/actions/workflows/tests.yml/badge.svg)](https://github.com/SidharthJoly/IronLedger/actions/workflows/tests.yml)
 
-**Live app:** https://sidharthjoly.github.io/IronLedger/
+**Live app:** https://ironledger.sidharthjoly.com/
 
 A personal strength-training log that tells you exactly what to lift next
 session — full set-by-set prescriptions, not just one number — instead of
@@ -61,7 +61,7 @@ below.
 
 ## Running it
 
-Just open the [live app](https://sidharthjoly.github.io/IronLedger/) —
+Just open the [live app](https://ironledger.sidharthjoly.com/) —
 that's the deployed `main` branch, no setup needed.
 
 For local development, any static file server works, e.g.:
