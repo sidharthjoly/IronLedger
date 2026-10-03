@@ -27,6 +27,13 @@ async function getClient() {
   return clientPromise;
 }
 
+// Test-only seam: lets tests/unit.html swap in a stub client (e.g. one that
+// returns postgrest-js's network-failure shape) without loading the real SDK
+// or touching the network. Pass null to go back to the lazily loaded SDK.
+export function setSupabaseClientForTests(client) {
+  clientPromise = client ? Promise.resolve(client) : null;
+}
+
 export async function getCurrentUser() {
   if (!isSupabaseConfigured()) return null;
   const supabase = await getClient();
