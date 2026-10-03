@@ -168,6 +168,29 @@ async function run() {
   // --- auth bar defaults to local mode, no network, when there's no cached session ---
   assert('auth bar shows local-mode status by default', doc.getElementById('auth-status-text').textContent === 'Working locally — not synced', doc.getElementById('auth-status-text').textContent);
   assert('auth action button offers Google sign-in', doc.getElementById('auth-action-btn').textContent === 'Sign in with Google to sync');
+
+  // --- sign-in with the auth host unreachable stays on the page ---
+  // Simulates a paused project whose subdomain no longer resolves: the
+  // health probe's fetch rejects (a microtask, so --dump-dom still sees the
+  // outcome). Without the probe, the OAuth redirect would navigate this
+  // iframe to a DNS-error page.
+  const realFetch = win.fetch;
+  const probedUrls = [];
+  win.fetch = (url) => {
+    probedUrls.push(String(url));
+    return Promise.reject(new TypeError('Failed to fetch'));
+  };
+  const pathBeforeSignIn = win.location.pathname;
+  const authBtn = doc.getElementById('auth-action-btn');
+  const unavailableMsg = 'Cloud sync is unavailable right now. Your workouts are still saved in this browser.';
+  fireClick(authBtn);
+  await waitFor(() => doc.getElementById('auth-status-text').textContent === unavailableMsg);
+  assert('unreachable auth host: sign-in shows the "cloud sync unavailable" message', doc.getElementById('auth-status-text').textContent === unavailableMsg, doc.getElementById('auth-status-text').textContent);
+  assert('unreachable auth host: the health endpoint was probed', probedUrls.some((u) => u.endsWith('/auth/v1/health')), probedUrls);
+  assert('unreachable auth host: the page did not navigate away', win.location.pathname === pathBeforeSignIn, win.location.href);
+  assert('unreachable auth host: the sign-in button is usable again', authBtn.disabled === false);
+  assert('unreachable auth host: local history is still on screen', doc.querySelectorAll('#history-table-body tr').length === 1);
+  win.fetch = realFetch;
 }
 </script>
 </body></html>
