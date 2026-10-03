@@ -98,41 +98,55 @@ function sessionToRow(entry, userId) {
   };
 }
 
-// Marks an error as "the request reached the server and was rejected"
-// (a bad value, an RLS violation) as opposed to a network-transport failure
-// (offline, DNS, timeout). appendSession() uses this to decide whether a
-// failure is worth silently queuing for retry — retrying a genuine
-// rejection would just fail forever and hide a real problem.
-function serverRejection(error) {
+// postgrest-js never throws on a transport failure — it catches the fetch
+// TypeError and hands it back as an ordinary `{ error, status: 0 }` result,
+// with an empty `code` and a message like "TypeError: Failed to fetch"
+// (Chrome), "TypeError: Load failed" (Safari) or "TypeError: NetworkError
+// when attempting to fetch resource." (Firefox). A real server response
+// always carries an HTTP status and, for a rejection, a Postgres/PostgREST
+// error code.
+function isNetworkFailure(error, status) {
+  if (status === 0) return true;
+  return !error.code && /TypeError|AbortError|Failed to fetch|NetworkError|Load failed/i.test(error.message || '');
+}
+
+// Wraps a postgrest-js error, marking whether the request actually reached
+// the server and was rejected (a bad value, an RLS violation) or never got
+// there (offline, DNS, timeout). appendSession() uses this to decide whether
+// a failure is worth silently queuing for retry — retrying a genuine
+// rejection would just fail forever and hide a real problem, but treating a
+// dropped connection as a rejection would throw away a workout logged with
+// no signal.
+function cloudError(error, status) {
   const err = new Error(error.message || 'Request rejected by the server');
-  err.isServerRejection = true;
+  err.isServerRejection = !isNetworkFailure(error, status);
   err.code = error.code;
   return err;
 }
 
 async function loadLogsCloud(userId) {
   const supabase = await getSupabaseClient();
-  const { data, error } = await supabase.from('sessions').select('*').eq('user_id', userId).order('date', { ascending: false });
-  if (error) throw serverRejection(error);
+  const { data, error, status } = await supabase.from('sessions').select('*').eq('user_id', userId).order('date', { ascending: false });
+  if (error) throw cloudError(error, status);
   return data.map(rowToSession);
 }
 
 async function appendSessionCloud(entry, userId) {
   const supabase = await getSupabaseClient();
-  const { error } = await supabase.from('sessions').insert(sessionToRow(entry, userId));
-  if (error) throw serverRejection(error);
+  const { error, status } = await supabase.from('sessions').insert(sessionToRow(entry, userId));
+  if (error) throw cloudError(error, status);
 }
 
 async function updateSessionCloud(entry, userId) {
   const supabase = await getSupabaseClient();
-  const { error } = await supabase.from('sessions').update(sessionToRow(entry, userId)).eq('id', entry.id).eq('user_id', userId);
-  if (error) throw serverRejection(error);
+  const { error, status } = await supabase.from('sessions').update(sessionToRow(entry, userId)).eq('id', entry.id).eq('user_id', userId);
+  if (error) throw cloudError(error, status);
 }
 
 async function deleteSessionCloud(id, userId) {
   const supabase = await getSupabaseClient();
-  const { error } = await supabase.from('sessions').delete().eq('id', id).eq('user_id', userId);
-  if (error) throw serverRejection(error);
+  const { error, status } = await supabase.from('sessions').delete().eq('id', id).eq('user_id', userId);
+  if (error) throw cloudError(error, status);
 }
 
 async function loadExerciseMetaCloud(userId) {

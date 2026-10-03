@@ -15,7 +15,8 @@ import { roundToPlate, getLoadIncrement, isLowerBodyCompound, convertWeight } fr
 import { todayStr } from '../js/lib/dateUtils.js';
 import { renderPlateStack } from '../js/components/plateStack.js';
 import { renderWeightTrendChart, renderVolumeChart } from '../js/components/progressChart.js';
-import { appendSession, updateSession, deleteSession, loadLogs, countPendingSessions, setActiveUser } from '../js/lib/storage.js';
+import { appendSession, updateSession, deleteSession, loadLogs, countPendingSessions, setActiveUser, syncPendingSessions } from '../js/lib/storage.js';
+import { setSupabaseClientForTests } from '../js/lib/supabaseClient.js';
 
 const { assert, report } = makeRunner();
 
@@ -155,10 +156,10 @@ const lbPlan = buildTodaysPlan({ exerciseName: 'Bench Press', muscleGroup: 'ches
 const expectedWorkingLb = convertWeight(100, 'kg', 'lb');
 assert('bug fix: a kg session converts before lb progression math (not read as raw 100lb)', Math.abs((lbPlan.progression.nextWeight - 5) - expectedWorkingLb) < 1, { nextWeight: lbPlan.progression.nextWeight, expectedWorkingLb });
 
-// --- storage.js: local-mode CRUD + offline queue (cloud mode needs a real
+// --- storage.js: local-mode CRUD (a real cloud round-trip needs a live
 // network/auth session, so it's exercised manually against the live project
-// rather than in CI — see METHODOLOGY.md-style reasoning in tests/run.sh's
-// comments and the README's Testing section) ---
+// rather than in CI — the cloud-mode error handling is covered below with a
+// stub client instead) ---
 localStorage.removeItem('gymapp:logs');
 localStorage.removeItem('gymapp:pendingSync');
 setActiveUser(null);
@@ -186,6 +187,89 @@ await deleteSession('unit-test-session-1');
 storedLogs = await loadLogs();
 assert('storage: deleteSession (local) removes the entry', !storedLogs.some((l) => l.id === 'unit-test-session-1'));
 
+localStorage.removeItem('gymapp:logs');
+localStorage.removeItem('gymapp:pendingSync');
+
+// --- storage.js: cloud-mode offline queue, against a stub client ---
+// postgrest-js doesn't throw when the network is down — it resolves with
+// this exact shape (captured from supabase-js 2.117.2 against an
+// unresolvable host). The queue has to recognise it as a transport failure,
+// not a server rejection, or offline saves get thrown away.
+const NETWORK_FAILURE = {
+  data: null, count: null, status: 0, statusText: '',
+  error: { message: 'TypeError: Failed to fetch', details: 'TypeError: Failed to fetch\n    at fetch (supabase-js.mjs)', hint: '', code: '' },
+};
+const SAFARI_NETWORK_FAILURE = {
+  data: null, count: null, statusText: '',
+  error: { message: 'TypeError: Load failed', details: '', hint: '', code: '' },
+};
+const RLS_REJECTION = {
+  data: null, count: null, status: 403, statusText: 'Forbidden',
+  error: { message: 'new row violates row-level security policy for table "sessions"', details: null, hint: null, code: '42501' },
+};
+const INSERT_OK = { data: null, count: null, status: 201, statusText: 'Created', error: null };
+
+function stubClient(result) {
+  const builder = {
+    insert: () => Promise.resolve(result),
+    update: () => builder,
+    delete: () => builder,
+    select: () => builder,
+    eq: () => builder,
+    order: () => Promise.resolve(result),
+  };
+  return { from: () => builder };
+}
+
+const cloudEntry = (id) => ({
+  id, date: '2026-01-02', exerciseName: 'Unit Test Exercise',
+  goal: 'hypertrophy', type: 'hypertrophy', unit: 'kg', muscleGroup: 'chest',
+  sets: [{ weight: 60, reps: 8, rpe: 8 }],
+});
+
+// A regression here would make appendSession throw — report that as a
+// failed assertion rather than aborting the whole page before report().
+async function tryAppend(entry) {
+  try {
+    return await appendSession(entry);
+  } catch (err) {
+    return { threw: err.message, isServerRejection: err.isServerRejection };
+  }
+}
+
+setActiveUser({ id: 'unit-test-user' });
+
+setSupabaseClientForTests(stubClient(NETWORK_FAILURE));
+const offlineResult = await tryAppend(cloudEntry('cloud-offline-1'));
+assert('storage: a network failure ({error, status: 0}) while signed in queues the save instead of throwing', offlineResult.queued === true && offlineResult.synced === false, offlineResult);
+assert('storage: the queued save is counted as pending', countPendingSessions() === 1, countPendingSessions());
+
+setSupabaseClientForTests(stubClient(SAFARI_NETWORK_FAILURE));
+const safariResult = await tryAppend(cloudEntry('cloud-offline-2'));
+assert('storage: a status-less "TypeError: Load failed" (Safari wording) also queues', safariResult.queued === true, safariResult);
+assert('storage: both offline saves are pending', countPendingSessions() === 2, countPendingSessions());
+
+setSupabaseClientForTests(stubClient(NETWORK_FAILURE));
+const stillOffline = await syncPendingSessions();
+assert('storage: syncing while still offline keeps queued entries rather than dropping them', stillOffline.remaining === 2 && stillOffline.dropped === 0, stillOffline);
+
+setSupabaseClientForTests(stubClient(RLS_REJECTION));
+let rejection = null;
+try {
+  await appendSession(cloudEntry('cloud-rejected-1'));
+} catch (err) {
+  rejection = err;
+}
+assert('storage: a genuine server rejection still throws', rejection?.isServerRejection === true, rejection && { message: rejection.message, isServerRejection: rejection.isServerRejection });
+assert('storage: a rejected save is not queued', countPendingSessions() === 2, countPendingSessions());
+
+setSupabaseClientForTests(stubClient(INSERT_OK));
+const backOnline = await syncPendingSessions();
+assert('storage: queued saves sync once the server is reachable again', backOnline.synced === 2 && backOnline.remaining === 0, backOnline);
+assert('storage: the queue is empty after a successful sync', countPendingSessions() === 0, countPendingSessions());
+
+setActiveUser(null);
+setSupabaseClientForTests(null);
 localStorage.removeItem('gymapp:logs');
 localStorage.removeItem('gymapp:pendingSync');
 
