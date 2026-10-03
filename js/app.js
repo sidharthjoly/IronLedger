@@ -126,9 +126,11 @@ async function loadAndRenderAll() {
     [logs, exerciseMeta, profile] = await Promise.all([loadLogs(), loadExerciseMeta(), loadProfile()]);
   } catch (err) {
     console.error('Failed to load data:', err);
-    showAuthStatus('Sync failed — showing local data only.', 'sync-error');
     setActiveUser(null);
     updateAuthUI(null);
+    // After updateAuthUI(null), which would otherwise replace this with the
+    // neutral "Working locally" text and hide that sync just failed.
+    showAuthStatus('Sync failed — showing local data only.', 'sync-error');
     [logs, exerciseMeta, profile] = await Promise.all([loadLogs(), loadExerciseMeta(), loadProfile()]);
   }
 
