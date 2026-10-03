@@ -20,7 +20,10 @@ async function getClient() {
     throw new Error('Supabase is not configured yet — set SUPABASE_URL in js/lib/supabaseClient.js.');
   }
   if (!clientPromise) {
-    clientPromise = import('https://esm.sh/@supabase/supabase-js@2').then(({ createClient }) =>
+    // Pinned to an exact version: a bare `@2` floats to whatever esm.sh
+    // resolves today, so a new release could change sign-in behaviour (or
+    // the error shapes storage.js depends on) without any change here.
+    clientPromise = import('https://esm.sh/@supabase/supabase-js@2.117.2').then(({ createClient }) =>
       createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
     );
   }
