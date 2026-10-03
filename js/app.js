@@ -604,8 +604,16 @@ async function saveSession() {
   try {
     const result = await appendSession(entry);
     logs.push(entry);
-    await upsertExerciseMeta(currentExercise, muscleGroupSelect.value);
     exerciseMeta[currentExercise] = muscleGroupSelect.value;
+    // The session is already saved (or queued for sync) by this point, so a
+    // failure to sync its muscle-group tag — e.g. offline, which is exactly
+    // when a save gets queued — mustn't report the whole save as failed:
+    // the user would save again and queue a duplicate.
+    try {
+      await upsertExerciseMeta(currentExercise, muscleGroupSelect.value);
+    } catch (err) {
+      console.error('Session saved, but its muscle-group tag failed to sync:', err);
+    }
     if (result.synced) {
       saveStatusFlash(saveSessionBtn, 'Session saved.');
     } else if (result.queued) {
